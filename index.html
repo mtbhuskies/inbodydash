@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InBody Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;margin:0;min-height:100%}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#F2F4F7;color:#1D2D44;-webkit-font-smoothing:antialiased}
+.header{background:#fff;padding:20px 16px 0;border-bottom:1px solid #E8ECF0;position:sticky;top:0;z-index:10}
+.header-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.header h1{font-size:17px;font-weight:700;color:#1D2D44}
+.nav{display:flex}
+.nav button{flex:1;background:none;border:none;padding:10px 0;font-size:14px;font-weight:500;color:#9BA8B5;cursor:pointer;border-bottom:2px solid transparent;transition:color .15s}
+.nav button.active{color:#1D2D44;border-bottom-color:#1D2D44}
+.page{display:none;padding:16px}
+.page.active{display:block}
+.card{background:#fff;border-radius:16px;padding:16px;margin-bottom:12px;border:1px solid #E8ECF0}
+.summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.stat-card{background:#fff;border-radius:14px;padding:11px 8px;border:1px solid #E8ECF0;text-align:center}
+.stat-card .label{font-size:10px;color:#9BA8B5;font-weight:600;margin-bottom:3px;letter-spacing:.02em}
+.stat-card .value{font-size:20px;font-weight:700;color:#1D2D44;line-height:1}
+.stat-card .unit{font-size:10px;color:#9BA8B5}
+.stat-card .badge{display:inline-block;margin-top:5px;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600}
+.badge-down{background:#FDE8EC;color:#C0385A}
+.badge-up{background:#E0F4F2;color:#1A7A6E}
+.badge-same{background:#F2F4F7;color:#6B7A8D}
+.chart-card{background:#fff;border-radius:16px;padding:16px;margin-bottom:0;border:1px solid #E8ECF0}
+.chart-header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px}
+.chart-title{font-size:15px;font-weight:700;color:#1D2D44}
+.chart-unit{font-size:12px;color:#9BA8B5;font-weight:400}
+.chart-latest{font-size:13px;color:#9BA8B5;text-align:right}
+.chart-latest strong{color:#1D2D44;font-size:15px}
+.chart-wrap{position:relative;height:160px;margin-top:10px}
+.section-label{font-size:11px;font-weight:700;color:#9BA8B5;letter-spacing:.06em;text-transform:uppercase;margin:20px 0 8px;padding:0 2px}
+.info-card{background:#fff;border-radius:16px;padding:16px;margin-bottom:0;border:1px solid #E8ECF0}
+.info-title{font-size:11px;font-weight:700;color:#9BA8B5;letter-spacing:.05em;text-transform:uppercase;margin-bottom:12px}
+.info-row{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F2F4F7}
+.info-row:last-child{border-bottom:none}
+.info-name{font-size:14px;font-weight:600;color:#1D2D44}
+.info-sub{font-size:11px;color:#9BA8B5;margin-top:1px}
+.info-right{text-align:right}
+.info-val{font-size:15px;font-weight:700;color:#1D2D44}
+.info-val.fat{color:#E8637A}
+.info-val.muscle{color:#2A9D8F}
+.info-diff{font-size:11px;margin-top:2px}
+.pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700}
+.pill-fat{background:#FDE8EC;color:#C0385A}
+.pill-muscle{background:#E0F4F2;color:#1A7A6E}
+.pill-norm{background:#E8F4FE;color:#1A5F8C}
+.pill-low{background:#FDE8EC;color:#C0385A}
+.pill-high{background:#E8F4E8;color:#1A7A1A}
+.seg-body{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin-top:12px}
+.seg-side{display:flex;flex-direction:column;gap:10px}
+.seg-limb{background:#F9FAFB;border-radius:12px;padding:10px 12px;border:1px solid #F0F2F5}
+.seg-limb-label{font-size:11px;color:#9BA8B5;font-weight:600;margin-bottom:4px}
+.seg-limb-val{font-size:16px;font-weight:700;color:#1D2D44}
+.seg-limb-pct{font-size:12px;font-weight:600;margin-top:2px}
+.seg-pct-high{color:#2A9D8F}
+.seg-pct-low{color:#E8637A}
+.seg-pct-norm{color:#9BA8B5}
+.seg-trunk{background:#F9FAFB;border-radius:12px;padding:12px;border:1px solid #F0F2F5;text-align:center}
+.seg-trunk-label{font-size:11px;color:#9BA8B5;font-weight:600;margin-bottom:4px}
+.seg-trunk-val{font-size:17px;font-weight:700;color:#1D2D44}
+.seg-trunk-pct{font-size:12px;font-weight:600;margin-top:2px}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:13px;font-weight:600;color:#555F70;margin-bottom:5px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form-note{font-size:11px;color:#9BA8B5;margin-bottom:10px;line-height:1.4}
+input[type=date],input[type=number]{width:100%;padding:10px 12px;border:1px solid #DDE1E7;border-radius:10px;font-size:15px;color:#1D2D44;background:#FAFBFC;-webkit-appearance:none;outline:none;-moz-appearance:textfield}
+input:focus{border-color:#E8637A;background:#fff}
+.btn-primary{width:100%;padding:14px;background:#E8637A;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;margin-top:8px}
+.btn-primary:active{opacity:.85}
+.btn-danger{background:none;border:1px solid #F0B4BD;color:#C0385A;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer}
+.scan-item{background:#fff;border-radius:14px;padding:14px 16px;margin-bottom:8px;border:1px solid #E8ECF0;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+.scan-item:active{background:#F9FAFB}
+.scan-date-text{font-size:14px;font-weight:600;color:#1D2D44}
+.scan-sub{font-size:12px;color:#9BA8B5;margin-top:2px}
+.scan-weight{font-size:18px;font-weight:700;color:#E8637A}
+.empty{text-align:center;padding:40px 20px;color:#9BA8B5;font-size:14px}
+.multi-legend{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#555F70;font-weight:500}
+.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:flex-end;justify-content:center}
+.modal-bg.open{display:flex}
+.modal{background:#fff;border-radius:20px 20px 0 0;padding:20px 16px 40px;width:100%;max-height:85vh;overflow-y:auto}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.modal-title{font-size:16px;font-weight:700}
+.modal-close{background:none;border:none;font-size:24px;color:#9BA8B5;cursor:pointer;line-height:1}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.detail-row{padding:10px 12px;background:#F9FAFB;border-radius:10px}
+.detail-label{font-size:11px;color:#9BA8B5;font-weight:500;margin-bottom:2px}
+.detail-value{font-size:15px;font-weight:700;color:#1D2D44}
+.history-meta{font-size:11px;color:#9BA8B5;margin-bottom:16px;padding:10px 12px;background:#F9FAFB;border-radius:10px}
+
+/* ── Dashboard 2-col grid ─────────────────────────────── */
+.dash-grid{display:grid;grid-template-columns:1fr;gap:0;padding:0}
+.dash-full{grid-column:1/-1;margin-bottom:12px}
+.dash-card-wrap{margin-bottom:12px}
+@media(min-width:700px){.dash-grid{grid-template-columns:1fr 1fr;gap:0 16px;align-items:start}.page{padding:20px 24px}.chart-wrap{height:190px}.header{padding:20px 24px 0}.summary-grid{grid-template-columns:repeat(3,1fr)}}@media(min-width:1100px){.page{padding:24px 32px}.header{padding:24px 32px 0}.chart-wrap{height:220px}.dash-grid{gap:0 20px}}
+
+.lock-screen{position:fixed;inset:0;background:#F2F4F7;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px}
+.lock-card{background:#fff;border-radius:24px;padding:32px 28px;width:100%;max-width:340px;border:1px solid #E8ECF0;text-align:center}
+.lock-logo{font-size:15px;font-weight:700;color:#1D2D44;margin-bottom:4px}
+.lock-sub{font-size:12px;color:#9BA8B5;margin-bottom:28px}
+.pin-dots{display:flex;gap:14px;justify-content:center;margin-bottom:24px}
+.pin-dot{width:14px;height:14px;border-radius:50%;background:#E8ECF0;transition:background .15s}
+.pin-dot.filled{background:#E8637A}
+.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%}
+.pin-btn{background:#F4F4F7;border:none;border-radius:14px;padding:18px 0;font-size:20px;font-weight:600;color:#1D2D44;cursor:pointer;transition:background .1s}
+.pin-btn:active{background:#E8ECF0}
+.pin-btn.zero{grid-column:2}
+.pin-error{font-size:13px;color:#E8637A;margin-top:12px;min-height:18px}
+.pin-change-btn{margin-top:16px;background:none;border:none;font-size:12px;color:#9BA8B5;cursor:pointer;text-decoration:underline}
+</style>
+</head>
+<body>
+
+<div id="lock-screen" class="lock-screen">
+  <div class="lock-card">
+    <div class="lock-logo">InBody Tracker</div>
+    <div class="lock-sub">InBody 270 &bull; Dietitian</div>
+    <div class="pin-dots">
+      <div class="pin-dot" id="d0"></div>
+      <div class="pin-dot" id="d1"></div>
+      <div class="pin-dot" id="d2"></div>
+      <div class="pin-dot" id="d3"></div>
+      <div class="pin-dot" id="d4"></div>
+      <div class="pin-dot" id="d5"></div>
+    </div>
+    <div class="pin-pad">
+      <button class="pin-btn" onclick="pinPress(1)">1</button>
+      <button class="pin-btn" onclick="pinPress(2)">2</button>
+      <button class="pin-btn" onclick="pinPress(3)">3</button>
+      <button class="pin-btn" onclick="pinPress(4)">4</button>
+      <button class="pin-btn" onclick="pinPress(5)">5</button>
+      <button class="pin-btn" onclick="pinPress(6)">6</button>
+      <button class="pin-btn" onclick="pinPress(7)">7</button>
+      <button class="pin-btn" onclick="pinPress(8)">8</button>
+      <button class="pin-btn" onclick="pinPress(9)">9</button>
+      <button class="pin-btn" onclick="pinPress(0)" style="grid-column:2">0</button>
+    </div>
+    <div class="pin-error" id="pin-error"></div>
+    <button class="pin-change-btn" id="pin-change-btn" style="display:none" onclick="showSetPin()">Change PIN</button>
+  </div>
+</div>
+
+<div id="set-pin-screen" class="lock-screen" style="display:none">
+  <div class="lock-card">
+    <div class="lock-logo">Set your PIN</div>
+    <div class="lock-sub" id="set-pin-sub">Enter a new 6-digit PIN</div>
+    <div class="pin-dots">
+      <div class="pin-dot" id="sd0"></div>
+      <div class="pin-dot" id="sd1"></div>
+      <div class="pin-dot" id="sd2"></div>
+      <div class="pin-dot" id="sd3"></div>
+      <div class="pin-dot" id="sd4"></div>
+      <div class="pin-dot" id="sd5"></div>
+    </div>
+    <div class="pin-pad">
+      <button class="pin-btn" onclick="setPinPress(1)">1</button>
+      <button class="pin-btn" onclick="setPinPress(2)">2</button>
+      <button class="pin-btn" onclick="setPinPress(3)">3</button>
+      <button class="pin-btn" onclick="setPinPress(4)">4</button>
+      <button class="pin-btn" onclick="setPinPress(5)">5</button>
+      <button class="pin-btn" onclick="setPinPress(6)">6</button>
+      <button class="pin-btn" onclick="setPinPress(7)">7</button>
+      <button class="pin-btn" onclick="setPinPress(8)">8</button>
+      <button class="pin-btn" onclick="setPinPress(9)">9</button>
+      <button class="pin-btn" onclick="setPinPress(0)" style="grid-column:2">0</button>
+    </div>
+    <div class="pin-error" id="set-pin-error"></div>
+  </div>
+</div>
+
+<div class="header">
+  <div class="header-top">
+    <h1>InBody Tracker</h1>
+    <span id="sync-status" style="font-size:11px;font-weight:500;color:#9BA8B5"></span>
+  </div>
+  <div class="nav">
+    <button class="active" onclick="showPage('dashboard',this)">Dashboard</button>
+    <button onclick="showPage('history',this)">History</button>
+    <button onclick="showPage('add',this)">+ Add Scan</button>
+    <button onclick="showPage('settings',this)" style="flex:0 0 42px;font-size:15px">&#9881;</button>
+  </div>
+</div>
+
+<div id="dashboard" class="page active"></div>
+<div id="history" class="page"></div>
+
+<div id="add" class="page">
+  <div style="margin-top:4px"></div>
+  <div id="profile-banner"></div>
+  <div class="card">
+    <div class="form-group">
+      <label>Scan date</label>
+      <input type="date" id="f-date">
+    </div>
+
+    <div class="section-label">Body composition analysis</div>
+    <div class="form-row">
+      <div class="form-group"><label>Weight (lb)</label><input type="number" id="f-weight" step="0.1" placeholder="0.0"></div>
+      <div class="form-group"><label>Body Fat Mass (lb)</label><input type="number" id="f-bfm" step="0.1" placeholder="0.0"></div>
+    </div>
+    <div class="form-group"><label>Dry Lean Mass (lb)</label><input type="number" id="f-dlm" step="0.1" placeholder="0.0"></div>
+    <div class="form-group"><label>Total Body Water (lb)</label><input type="number" id="f-tbw" step="0.1" placeholder="0.0"></div>
+
+    <div class="section-label">Muscle-Fat analysis</div>
+    <div class="form-row">
+      <div class="form-group"><label>SMM — Skeletal Muscle (lb)</label><input type="number" id="f-smm" step="0.1" placeholder="0.0"></div>
+      <div class="form-group"><label>PBF — Body Fat %</label><input type="number" id="f-bfp" step="0.1" placeholder="0.0"></div>
+    </div>
+
+    <div class="section-label">Obesity analysis</div>
+    <div class="form-row">
+      <div class="form-group"><label>BMI (kg/m²)</label><input type="number" id="f-bmi" step="0.1" placeholder="0.0"></div>
+    </div>
+
+    <div class="section-label">Body Fat 0 — Lean Body Mass Control</div>
+    <p class="form-note">(+) means to gain fat/lean &nbsp;&bull;&nbsp; (-) means to lose fat/lean</p>
+    <div class="form-row">
+      <div class="form-group"><label>Body Fat Control (lb)</label><input type="number" id="f-bfc" step="0.1" placeholder="-0.0"></div>
+      <div class="form-group"><label>Lean Mass Control (lb)</label><input type="number" id="f-lmc" step="0.1" placeholder="0.0"></div>
+    </div>
+
+    <div class="section-label">Research parameters</div>
+    <div class="form-row">
+      <div class="form-group"><label>BMR (kcal)</label><input type="number" id="f-bmr" step="1" placeholder="0"></div>
+      <div class="form-group"><label>SMI (kg/m²)</label><input type="number" id="f-smi" step="0.1" placeholder="0.0"></div>
+    </div>
+
+    <div class="section-label">Segmental lean analysis (lb &amp; %)</div>
+    <p class="form-note">Enter the lb value and % score from each segment</p>
+    <div class="form-row">
+      <div class="form-group"><label>Left Arm (lb)</label><input type="number" id="f-la" step="0.01" placeholder="0.00"></div>
+      <div class="form-group"><label>Left Arm %</label><input type="number" id="f-la-pct" step="0.1" placeholder="100.0"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Right Arm (lb)</label><input type="number" id="f-ra" step="0.01" placeholder="0.00"></div>
+      <div class="form-group"><label>Right Arm %</label><input type="number" id="f-ra-pct" step="0.1" placeholder="100.0"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Trunk (lb)</label><input type="number" id="f-trunk" step="0.1" placeholder="0.0"></div>
+      <div class="form-group"><label>Trunk %</label><input type="number" id="f-trunk-pct" step="0.1" placeholder="100.0"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Left Leg (lb)</label><input type="number" id="f-ll" step="0.01" placeholder="0.00"></div>
+      <div class="form-group"><label>Left Leg %</label><input type="number" id="f-ll-pct" step="0.1" placeholder="100.0"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Right Leg (lb)</label><input type="number" id="f-rl" step="0.01" placeholder="0.00"></div>
+      <div class="form-group"><label>Right Leg %</label><input type="number" id="f-rl-pct" step="0.1" placeholder="100.0"></div>
+    </div>
+
+    <button class="btn-primary" onclick="saveScan()">Save Scan</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="scan-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-date"></span>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div id="modal-body"></div>
+    <div style="margin-top:16px;text-align:right">
+      <button class="btn-danger" id="modal-delete-btn">Delete scan</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var FUCHSIA   = '#E8637A';
+var TEAL      = '#2A9D8F';
+var GRAY_LINE = '#D4DAE2';
+var GRAY_TEXT = '#9BA8B5';
+var charts = {};
+
+// ── Storage keys ──────────────────────────────────────────────────────
+var LS_SCANS   = 'inbody_scans_v4';
+var LS_PROFILE = 'inbody_profile_v1';
+var LS_TOKEN   = 'inbody_gh_token';
+var LS_GIST    = 'inbody_gh_gist';
+
+// ── Local storage (always used as cache) ──────────────────────────────
+function load(){ try{ return JSON.parse(localStorage.getItem(LS_SCANS))||[]; }catch(e){ return []; } }
+function _saveLocal(s){ localStorage.setItem(LS_SCANS, JSON.stringify(s)); }
+function getProfile(){ try{ return JSON.parse(localStorage.getItem(LS_PROFILE))||{}; }catch(e){ return {}; } }
+function saveProfile(p){ localStorage.setItem(LS_PROFILE, JSON.stringify(p)); gistSave(); }
+function clearProfile(){ localStorage.removeItem(LS_PROFILE); renderProfileBanner(); gistSave(); }
+function profileComplete(){ var p=getProfile(); return !!(p.heightCm&&p.sex&&p.age); }
+function sorted(s){ return s.slice().sort(function(a,b){ return a.date<b.date?-1:1; }); }
+
+function save(scans){
+  _saveLocal(scans);
+  gistSave();
+}
+
+// ── GitHub Gist sync ──────────────────────────────────────────────────
+function getToken(){ return localStorage.getItem(LS_TOKEN)||''; }
+function getGistId(){ return localStorage.getItem(LS_GIST)||''; }
+function isConnected(){ return !!(getToken()&&getGistId()); }
+
+function setSyncStatus(msg, color){
+  var el = document.getElementById('sync-status');
+  if(el){ el.textContent = msg; el.style.color = color||'#9BA8B5'; }
+}
+
+async function gistLoad(){
+  if(!isConnected()) return;
+  setSyncStatus('Syncing…', '#9BA8B5');
+  try{
+    var resp = await fetch('https://api.github.com/gists/'+getGistId(), {
+      headers:{ 'Authorization':'token '+getToken(), 'Accept':'application/vnd.github.v3+json' }
+    });
+    if(!resp.ok) throw new Error('HTTP '+resp.status);
+    var data = await resp.json();
+    var content = data.files && data.files['inbody_data.json'] && data.files['inbody_data.json'].content;
+    if(!content) throw new Error('File not found in Gist');
+    var parsed = JSON.parse(content);
+    if(parsed.scans) _saveLocal(parsed.scans);
+    if(parsed.profile) localStorage.setItem(LS_PROFILE, JSON.stringify(parsed.profile));
+    setSyncStatus('Synced ' + _timeAgo(new Date()), '#2A9D8F');
+    renderDashboard();
+  }catch(e){
+    setSyncStatus('Sync error', '#E8637A');
+    console.error('Gist load error:', e);
+  }
+}
+
+var _saveDebounce = null;
+async function gistSave(){
+  if(!isConnected()) return;
+  clearTimeout(_saveDebounce);
+  _saveDebounce = setTimeout(async function(){
+    setSyncStatus('Saving…', '#9BA8B5');
+    try{
+      var payload = JSON.stringify({ scans:load(), profile:getProfile() }, null, 2);
+      var body = { files:{ 'inbody_data.json':{ content:payload } } };
+      var resp = await fetch('https://api.github.com/gists/'+getGistId(), {
+        method:'PATCH',
+        headers:{
+          'Authorization':'token '+getToken(),
+          'Accept':'application/vnd.github.v3+json',
+          'Content-Type':'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+      if(!resp.ok) throw new Error('HTTP '+resp.status);
+      setSyncStatus('Saved ✓ ' + _timeAgo(new Date()), '#2A9D8F');
+    }catch(e){
+      setSyncStatus('Save error', '#E8637A');
+      console.error('Gist save error:', e);
+    }
+  }, 600);
+}
+
+function _timeAgo(d){
+  return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+}
+
+// ── Connect / Disconnect ──────────────────────────────────────────────
+async function connectGist(){
+  var token  = document.getElementById('s-token').value.trim();
+  var gistId = document.getElementById('s-gist-id').value.trim();
+  var statusEl = document.getElementById('gist-setup-status');
+
+  if(!token){ alert('Please enter your GitHub token.'); return; }
+
+  statusEl.textContent = 'Connecting…';
+  statusEl.style.color = '#9BA8B5';
+  statusEl.style.display = 'block';
+
+  try{
+    // Validate token
+    var userResp = await fetch('https://api.github.com/user', {
+      headers:{ 'Authorization':'token '+token, 'Accept':'application/vnd.github.v3+json' }
+    });
+    if(!userResp.ok) throw new Error('Invalid token (HTTP '+userResp.status+')');
+    var user = await userResp.json();
+
+    if(gistId){
+      // Verify existing gist
+      var gistResp = await fetch('https://api.github.com/gists/'+gistId, {
+        headers:{ 'Authorization':'token '+token }
+      });
+      if(!gistResp.ok) throw new Error('Gist not found');
+    } else {
+      // Create new private gist
+      var existing = load();
+      var payload = JSON.stringify({ scans:existing, profile:getProfile() }, null, 2);
+      var createResp = await fetch('https://api.github.com/gists', {
+        method:'POST',
+        headers:{
+          'Authorization':'token '+token,
+          'Accept':'application/vnd.github.v3+json',
+          'Content-Type':'application/json'
+        },
+        body: JSON.stringify({
+          description:'InBody Tracker data',
+          public: false,
+          files:{ 'inbody_data.json':{ content: payload } }
+        })
+      });
+      if(!createResp.ok) throw new Error('Failed to create Gist');
+      var created = await createResp.json();
+      gistId = created.id;
+    }
+
+    localStorage.setItem(LS_TOKEN, token);
+    localStorage.setItem(LS_GIST, gistId);
+    statusEl.textContent = 'Connected as @' + user.login;
+    statusEl.style.color = '#2A9D8F';
+
+    document.getElementById('s-token').value = '';
+    setTimeout(function(){
+      renderSettingsProfile();
+      updateGistUI();
+      gistLoad();
+    }, 800);
+
+  }catch(e){
+    statusEl.textContent = 'Error: ' + e.message;
+    statusEl.style.color = '#E8637A';
+  }
+}
+
+function disconnectGist(){
+  if(!confirm('Disconnect GitHub Gist? Your local data stays. You can reconnect anytime.')) return;
+  localStorage.removeItem(LS_TOKEN);
+  localStorage.removeItem(LS_GIST);
+  updateGistUI();
+  setSyncStatus('', '');
+}
+
+function updateGistUI(){
+  var connected = isConnected();
+  var setupView = document.getElementById('gist-setup-view');
+  var connView  = document.getElementById('gist-connected-view');
+  var infoEl    = document.getElementById('gist-info');
+  if(!setupView||!connView) return;
+  if(connected){
+    setupView.style.display = 'none';
+    connView.style.display  = 'block';
+    if(infoEl) infoEl.textContent = 'Gist ID: ' + getGistId().slice(0,12) + '…';
+  } else {
+    setupView.style.display = 'block';
+    connView.style.display  = 'none';
+  }
+}
+
+function fmt(v,dec){
+  if(v==null||v===''||isNaN(v)||v===undefined) return '—';
+  return Number(v).toFixed(dec==null?1:dec);
+}
+function fmtSign(v,dec){
+  if(v==null||isNaN(v)) return '—';
+  var n=Number(v).toFixed(dec==null?1:dec);
+  return Number(v)>0?'+'+n:n;
+}
+function fmtDate(d){
+  if(!d) return '';
+  var p=d.split('-'),m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return m[parseInt(p[1])-1]+' '+parseInt(p[2])+', '+p[0];
+}
+function shortDate(d){
+  if(!d) return '';
+  var p=d.split('-'),m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return m[parseInt(p[1])-1]+' '+parseInt(p[2]);
+}
+
+// SMI thresholds (EWGSOP2): Male 7.0-9.2, Female 5.7-7.4
+function smiCat(smi){
+  if(smi==null) return null;
+  var p=getProfile(),male=(p.sex==='male');
+  var lo=male?7.0:5.7,hi=male?9.2:7.4;
+  if(smi<lo) return {label:'Low',cls:'pill-low'};
+  if(smi>hi) return {label:'High',cls:'pill-high'};
+  return {label:'Normal',cls:'pill-norm'};
+}
+
+// Segment % color: >=100 good (teal), <80 low (fuchsia), else neutral
+function pctClass(pct){
+  if(pct==null) return 'seg-pct-norm';
+  return pct>=100?'seg-pct-high':pct<80?'seg-pct-low':'seg-pct-norm';
+}
+
+function showPage(id,btn){
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+  document.querySelectorAll('.nav button').forEach(function(b){ b.classList.remove('active'); });
+  document.getElementById(id).classList.add('active');
+  if(btn) btn.classList.add('active');
+  if(id==='dashboard') renderDashboard();
+  if(id==='history') renderHistory();
+  if(id==='add') renderProfileBanner();
+  if(id==='settings'){ renderSettingsProfile(); updateGistUI(); }
+}
+function renderProfileBanner(){
+  var p=getProfile(),el=document.getElementById('profile-banner');
+  if(!el) return;
+  if(!profileComplete()){
+    el.innerHTML='<div style="background:#FFF8F0;border:1px solid #F5D5B0;border-radius:14px;padding:14px;margin-bottom:12px">'+
+      '<div style="font-size:13px;font-weight:700;color:#7A5020;margin-bottom:10px">Set your profile for SMI classification</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'+
+        '<div><label style="font-size:11px;font-weight:600;color:#555F70;display:block;margin-bottom:4px">Height</label>'+
+        '<div style="display:flex;gap:4px">'+
+          '<input type="number" id="p-ft" placeholder="ft" min="4" max="7" style="width:52px;padding:8px;border:1px solid #DDE1E7;border-radius:8px;font-size:14px;background:#fff;outline:none">'+
+          '<input type="number" id="p-in" placeholder="in" min="0" max="11" style="width:52px;padding:8px;border:1px solid #DDE1E7;border-radius:8px;font-size:14px;background:#fff;outline:none">'+
+        '</div></div>'+
+        '<div><label style="font-size:11px;font-weight:600;color:#555F70;display:block;margin-bottom:4px">Age</label>'+
+        '<input type="number" id="p-age" placeholder="e.g. 35" min="16" max="99" style="width:100%;padding:8px;border:1px solid #DDE1E7;border-radius:8px;font-size:14px;background:#fff;outline:none"></div>'+
+      '</div>'+
+      '<div style="margin-bottom:10px"><label style="font-size:11px;font-weight:600;color:#555F70;display:block;margin-bottom:4px">Sex</label>'+
+      '<div style="display:flex;gap:8px" id="sex-btns">'+
+        '<button id="sex-male-btn" onclick="selectSex(this.dataset.sex)" data-sex="male" style="flex:1;padding:8px;border:1px solid #DDE1E7;border-radius:8px;font-size:13px;font-weight:600;background:#fff;color:#555F70;cursor:pointer">Male</button>'+
+        '<button id="sex-female-btn" onclick="selectSex(this.dataset.sex)" data-sex="female" style="flex:1;padding:8px;border:1px solid #DDE1E7;border-radius:8px;font-size:13px;font-weight:600;background:#fff;color:#555F70;cursor:pointer">Female</button>'+
+      '</div></div>'+
+      '<button onclick="saveProfileForm()" style="width:100%;padding:10px;background:#E8637A;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">Save Profile</button>'+
+    '</div>';
+    window._selectedSex=null;
+  } else {
+    var ht=Math.round(p.heightCm/2.54),ft=Math.floor(ht/12),ins=ht%12;
+    el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;background:#F9FAFB;border-radius:10px;padding:10px 12px;margin-bottom:12px">'+
+      '<span style="font-size:12px;color:#555F70;font-weight:600">'+ft+"'"+ins+'" &nbsp;|&nbsp; Age '+p.age+' &nbsp;|&nbsp; '+p.sex.charAt(0).toUpperCase()+p.sex.slice(1)+'</span>'+
+      '<button onclick="clearProfile()" style="font-size:11px;color:#9BA8B5;background:none;border:none;cursor:pointer;text-decoration:underline">Edit</button>'+
+    '</div>';
+  }
+}
+function selectSex(s){
+  window._selectedSex=s;
+  var mb=document.getElementById('sex-male-btn'),fb=document.getElementById('sex-female-btn');
+  if(!mb||!fb) return;
+  mb.style.cssText+=(s==='male'?';background:#E8637A;color:#fff;border-color:#E8637A':';background:#fff;color:#555F70;border-color:#DDE1E7');
+  fb.style.cssText+=(s==='female'?';background:#E8637A;color:#fff;border-color:#E8637A':';background:#fff;color:#555F70;border-color:#DDE1E7');
+}
+function saveProfileForm(){
+  var ft=parseFloat(document.getElementById('p-ft').value)||0;
+  var ins=parseFloat(document.getElementById('p-in').value)||0;
+  var age=parseFloat(document.getElementById('p-age').value)||0;
+  if(!ft||!window._selectedSex||!age){ alert('Please fill in all fields.'); return; }
+  saveProfile({heightCm:Math.round(((ft*12)+ins)*2.54*10)/10,age:age,sex:window._selectedSex});
+  renderProfileBanner(); renderDashboard();
+}
+
+function destroyChart(id){ if(charts[id]){ charts[id].destroy(); delete charts[id]; } }
+
+function makeChart(canvasId,labels,datasets,yMin,yMax){
+  destroyChart(canvasId);
+  var ctx=document.getElementById(canvasId);
+  if(!ctx) return;
+  charts[canvasId]=new Chart(ctx,{
+    type:'line',
+    data:{labels:labels,datasets:datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{
+        callbacks:{label:function(c){ return ' '+Number(c.parsed.y).toFixed(2); }},
+        backgroundColor:'#1D2D44',padding:8,cornerRadius:8,
+        titleFont:{size:11},bodyFont:{size:13,weight:'bold'}
+      }},
+      scales:{
+        x:{grid:{display:false},border:{display:false},ticks:{color:GRAY_TEXT,font:{size:10},maxRotation:30}},
+        y:{grid:{color:'#EDF0F3'},border:{display:false},ticks:{color:GRAY_TEXT,font:{size:10},maxTicksLimit:5},min:yMin,max:yMax}
+      },
+      elements:{point:{hoverRadius:7}}
+    }
+  });
+}
+
+function ds(data,color){
+  return [{data:data,borderColor:GRAY_LINE,borderWidth:1.5,
+    pointBackgroundColor:color,pointBorderColor:color,
+    pointRadius:5,pointHoverRadius:7,tension:0.35,fill:false}];
+}
+
+function yRange(arr,pad){
+  var vals=arr.filter(function(v){ return v!=null&&!isNaN(v); });
+  if(!vals.length) return [null,null];
+  var mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals);
+  var p=pad||Math.max((mx-mn)*0.4,0.5);
+  return [Math.floor((mn-p)*10)/10,Math.ceil((mx+p)*10)/10];
+}
+
+function renderDashboard(){
+  var scans=sorted(load());
+  var el=document.getElementById('dashboard');
+  if(!scans.length){
+    el.innerHTML='<div class="empty"><div style="font-size:36px;margin-bottom:12px">○</div><div style="font-weight:600;font-size:15px;margin-bottom:6px;color:#1D2D44">No scans yet</div><div>Tap "+ Add Scan" to log your first InBody 270 result.</div></div>';
+    return;
+  }
+
+  var latest=scans[scans.length-1];
+  var prev=scans.length>1?scans[scans.length-2]:null;
+
+  function badge(val,prevVal,lowerBetter){
+    if(!prev) return '<span class="badge badge-same">First scan</span>';
+    var diff=Number(val)-Number(prevVal);
+    if(isNaN(diff)||Math.abs(diff)<0.05) return '<span class="badge badge-same">Stable</span>';
+    var improving=lowerBetter?diff<0:diff>0;
+    var sign=diff>0?'+':'';
+    return improving
+      ?'<span class="badge badge-up">'+sign+diff.toFixed(1)+'</span>'
+      :'<span class="badge badge-down">'+sign+diff.toFixed(1)+'</span>';
+  }
+
+  var labels =scans.map(function(s){ return shortDate(s.date); });
+  var wData  =scans.map(function(s){ return s.weight; });
+  var bfData =scans.map(function(s){ return s.bfp; });
+  var smmData=scans.map(function(s){ return s.smm; });
+  var bfmData=scans.map(function(s){ return s.bfm; });
+  var dlmData=scans.map(function(s){ return s.dlm; });
+
+  var tbwData=scans.map(function(s){ return s.tbw; });
+  var bmrData=scans.map(function(s){ return s.bmr; });
+  var bmiData=scans.map(function(s){ return s.bmi; });
+  var smiData=scans.map(function(s){ return s.smi; });
+  var raData =scans.map(function(s){ return s.ra; });
+  var laData =scans.map(function(s){ return s.la; });
+  var rlData =scans.map(function(s){ return s.rl; });
+  var llData =scans.map(function(s){ return s.ll; });
+  var trData =scans.map(function(s){ return s.trunk; });
+
+  function chartCard(title,unit,latestVal,prevVal,id){
+    var diff=(prevVal!=null&&latestVal!=null)?(Number(latestVal)-Number(prevVal)):null;
+    var diffStr=diff!=null?(diff>0?'+':'')+diff.toFixed(1):'';
+    return '<div class="chart-card">'+
+      '<div class="chart-header"><span class="chart-title">'+title+(unit?' <span class="chart-unit">('+unit+')</span>':'')+'</span>'+
+      '<div class="chart-latest">'+(diffStr?'<span style="color:'+GRAY_TEXT+';font-size:12px">'+diffStr+'&nbsp;</span>':'')+'<strong>'+fmt(latestVal)+'</strong></div></div>'+
+      '<div class="chart-wrap"><canvas id="'+id+'"></canvas></div></div>';
+  }
+
+  // Body Fat 0 / Lean Body Mass Control card
+  function controlCard(){
+    var bfc=latest.bfc, lmc=latest.lmc;
+    var hasBfc=bfc!=null&&!isNaN(bfc), hasLmc=lmc!=null&&!isNaN(lmc);
+    if(!hasBfc&&!hasLmc) return '';
+    var html='<div class="info-card"><div class="info-title">Body Fat 0 &mdash; Lean Body Mass Control</div>';
+    if(hasBfc){
+      var n=Number(bfc);
+      html+='<div class="info-row">'+
+        '<div><div class="info-name">Body Fat Control</div><div class="info-sub">(+) gain &nbsp; (-) lose fat mass</div></div>'+
+        '<div class="info-right"><div class="info-val '+(n<=0?'fat':'muscle')+'">'+fmtSign(bfc)+' lb</div>'+
+        '<span class="pill '+(n<=0?'pill-fat':'pill-muscle')+'">'+(n<=0?'Lose fat':'Gain fat')+'</span></div></div>';
+    }
+    if(hasLmc){
+      var n=Number(lmc);
+      html+='<div class="info-row">'+
+        '<div><div class="info-name">Lean Body Mass Control</div><div class="info-sub">(+) gain &nbsp; (-) lose lean mass</div></div>'+
+        '<div class="info-right"><div class="info-val '+(n>=0?'muscle':'fat')+'">'+fmtSign(lmc)+' lb</div>'+
+        '<span class="pill '+(n>=0?'pill-muscle':'pill-fat')+'">'+(n>=0?'Gain lean':'Lose lean')+'</span></div></div>';
+    }
+    return html+'</div>';
+  }
+
+  // Research Parameters card
+  function researchCard(){
+    var smi=latest.smi; var prof=getProfile();
+    var sc=smiCat(smi);
+    var bmrDiff=prev&&latest.bmr&&prev.bmr?(Number(latest.bmr)-Number(prev.bmr)):null;
+    var smiDiff=prev&&latest.smi&&prev.smi?(Number(latest.smi)-Number(prev.smi)):null;
+    return '<div class="info-card"><div class="info-title">Research Parameters</div>'+
+
+      '<div class="info-row">'+
+        '<div><div class="info-name">Basal Metabolic Rate</div><div class="info-sub">Min calories at rest</div></div>'+
+        '<div class="info-right"><div class="info-val">'+fmt(latest.bmr,0)+' <span style="font-size:11px;color:#9BA8B5">kcal</span></div>'+
+        (bmrDiff!=null?'<div class="info-diff" style="color:'+(bmrDiff>=0?TEAL:FUCHSIA)+'">'+fmtSign(bmrDiff,0)+' from prev</div>':'')+
+        '</div></div>'+
+      '<div class="info-row">'+
+        '<div><div class="info-name">SMI</div><div class="info-sub">Skeletal Muscle Index (kg/m&sup2;)</div></div>'+
+        '<div class="info-right">'+
+        (smi!=null?'<div class="info-val">'+fmt(smi,2)+'</div>'+(sc?'<span class="pill '+sc.cls+'">'+sc.label+'</span>':''):'<span style="font-size:13px;color:#9BA8B5">—</span>')+
+        (smiDiff!=null?'<div class="info-diff" style="color:'+(smiDiff>=0?TEAL:FUCHSIA)+'">'+fmtSign(smiDiff,2)+' from prev</div>':'')+
+        '</div></div>'+
+      '</div>';
+  }
+
+  // Segmental Lean Analysis card — body diagram layout
+  function segCard(){
+    var s=latest;
+    function limb(label,lb,pct){
+      var pc=pct!=null?Number(pct):null;
+      var cls=pctClass(pc);
+      return '<div class="seg-limb">'+
+        '<div class="seg-limb-label">'+label+'</div>'+
+        '<div class="seg-limb-val">'+(lb!=null?fmt(lb)+' lb':'—')+'</div>'+
+        (pc!=null?'<div class="seg-limb-pct '+cls+'">'+fmt(pc,1)+'%</div>':'')+
+        '</div>';
+    }
+    var trPc=s.trunkPct!=null?Number(s.trunkPct):null;
+    var trCls=pctClass(trPc);
+    return '<div class="info-card"><div class="info-title">Segmental Lean Analysis</div>'+
+      '<div class="seg-body">'+
+        '<div class="seg-side">'+limb('Left Arm',s.la,s.laPct)+limb('Left Leg',s.ll,s.llPct)+'</div>'+
+        '<div class="seg-trunk">'+
+          '<div class="seg-trunk-label">Trunk</div>'+
+          '<div class="seg-trunk-val">'+(s.trunk!=null?fmt(s.trunk)+' lb':'—')+'</div>'+
+          (trPc!=null?'<div class="seg-trunk-pct '+trCls+'">'+fmt(trPc,1)+'%</div>':'')+
+        '</div>'+
+        '<div class="seg-side">'+limb('Right Arm',s.ra,s.raPct)+limb('Right Leg',s.rl,s.rlPct)+'</div>'+
+      '</div>'+
+      '<p style="font-size:10px;color:#9BA8B5;margin-top:10px;text-align:center">100% = ideal for your body weight</p>'+
+      '</div>';
+  }
+
+  el.innerHTML=
+    '<div style="margin-top:4px"></div>'+
+    '<div class="summary-grid dash-full" style="margin-bottom:12px">'+
+      '<div class="stat-card"><div class="label">Weight</div><div class="value">'+fmt(latest.weight)+'<span class="unit"> lb</span></div>'+badge(latest.weight,prev&&prev.weight,true)+'</div>'+
+      '<div class="stat-card"><div class="label">Muscle</div><div class="value">'+fmt(latest.smm)+'<span class="unit"> lb</span></div>'+badge(latest.smm,prev&&prev.smm,false)+'</div>'+
+      '<div class="stat-card"><div class="label">Body Fat</div><div class="value">'+fmt(latest.bfp)+'<span class="unit">%</span></div>'+badge(latest.bfp,prev&&prev.bfp,true)+'</div>'+
+    '</div>'+
+    '<div class="dash-grid">'+
+    '<div class="dash-full">'+controlCard()+'</div>'+
+    '<div class="dash-full">'+researchCard()+'</div>'+
+    '<div class="dash-full">'+segCard()+'</div>'+
+    '<div class="section-label dash-full">Trends</div>'+
+    '<div class="dash-card-wrap">'+chartCard('Weight','lb',latest.weight,prev&&prev.weight,'ch-weight')+'</div>'+
+    '<div class="dash-card-wrap">'+chartCard('Body Fat %','',latest.bfp,prev&&prev.bfp,'ch-bfp')+'</div>'+
+    '<div class="chart-card dash-card-wrap"><div class="chart-header"><span class="chart-title">Muscle vs Fat <span class="chart-unit">(lb)</span></span></div><div class="chart-wrap"><canvas id="ch-mvf"></canvas></div><div class="multi-legend"><div class="legend-item"><div class="legend-dot" style="background:'+TEAL+'"></div>Skeletal Muscle</div><div class="legend-item"><div class="legend-dot" style="background:'+FUCHSIA+'"></div>Body Fat</div><div class="legend-item"><div class="legend-dot" style="background:#B0BAC8"></div>Dry Lean</div></div></div>'+
+    '<div class="dash-card-wrap">'+chartCard('BMI','kg/m²',latest.bmi,prev&&prev.bmi,'ch-bmi')+'</div>'+
+    '<div class="dash-card-wrap">'+chartCard('Body Water','lb',latest.tbw,prev&&prev.tbw,'ch-tbw')+'</div>'+
+    '<div class="dash-card-wrap">'+chartCard('BMR','kcal',latest.bmr,prev&&prev.bmr,'ch-bmr')+'</div>'+
+    (latest.smi?'<div class="dash-card-wrap">'+chartCard('SMI','kg/m²',latest.smi,prev&&prev.smi,'ch-smi')+'</div>':'')+
+    '<div class="section-label dash-full">Segmental lean trends</div>'+
+    '<div class="dash-card-wrap">'+chartCard('Left Arm','lb',latest.la,prev&&prev.la,'ch-la')+'</div>'+
+    '<div class="dash-card-wrap">'+chartCard('Right Arm','lb',latest.ra,prev&&prev.ra,'ch-ra')+'</div>'+
+    '<div class="dash-card-wrap">'+chartCard('Left Leg','lb',latest.ll,prev&&prev.ll,'ch-ll')+'</div>'+
+    '<div class="dash-card-wrap">'+chartCard('Right Leg','lb',latest.rl,prev&&prev.rl,'ch-rl')+'</div>'+
+    '<div class="dash-card-wrap">'+chartCard('Trunk','lb',latest.trunk,prev&&prev.trunk,'ch-trunk')+'</div>'+
+    '</div>'+
+    '<div style="height:80px"></div>';
+
+  requestAnimationFrame(function(){
+    var r;
+    r=yRange(wData,2);    makeChart('ch-weight',labels,ds(wData,FUCHSIA),r[0],r[1]);
+    r=yRange(bfData,1);   makeChart('ch-bfp',labels,ds(bfData,FUCHSIA),r[0],r[1]);
+    r=yRange(bmiData,.5); makeChart('ch-bmi',labels,ds(bmiData,FUCHSIA),r[0],r[1]);
+    r=yRange(tbwData,2);  makeChart('ch-tbw',labels,ds(tbwData,TEAL),r[0],r[1]);
+    r=yRange(bmrData,50); makeChart('ch-bmr',labels,ds(bmrData,TEAL),r[0],r[1]);
+    r=yRange(smiData,.2); makeChart('ch-smi',labels,ds(smiData,TEAL),r[0],r[1]);
+    r=yRange(raData,.3);  makeChart('ch-ra',labels,ds(raData,TEAL),r[0],r[1]);
+    r=yRange(laData,.3);  makeChart('ch-la',labels,ds(laData,TEAL),r[0],r[1]);
+    r=yRange(rlData,.5);  makeChart('ch-rl',labels,ds(rlData,TEAL),r[0],r[1]);
+    r=yRange(llData,.5);  makeChart('ch-ll',labels,ds(llData,TEAL),r[0],r[1]);
+    r=yRange(trData,1);   makeChart('ch-trunk',labels,ds(trData,TEAL),r[0],r[1]);
+
+    var allMvf=smmData.concat(bfmData).concat(dlmData).filter(function(v){return v!=null;});
+    var mvfR=yRange(allMvf,5);
+    destroyChart('ch-mvf');
+    var mvfCtx=document.getElementById('ch-mvf');
+    if(mvfCtx){
+      charts['ch-mvf']=new Chart(mvfCtx,{
+        type:'line',
+        data:{labels:labels,datasets:[
+          {data:smmData,borderColor:GRAY_LINE,borderWidth:1.5,pointBackgroundColor:TEAL,pointBorderColor:TEAL,pointRadius:5,tension:.35,fill:false,label:'Skeletal Muscle'},
+          {data:bfmData,borderColor:GRAY_LINE,borderWidth:1.5,pointBackgroundColor:FUCHSIA,pointBorderColor:FUCHSIA,pointRadius:5,tension:.35,fill:false,label:'Body Fat'},
+          {data:dlmData,borderColor:GRAY_LINE,borderWidth:1.5,pointBackgroundColor:'#B0BAC8',pointBorderColor:'#B0BAC8',pointRadius:5,tension:.35,fill:false,label:'Dry Lean'}
+        ]},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},tooltip:{backgroundColor:'#1D2D44',padding:8,cornerRadius:8,
+            callbacks:{label:function(c){return ' '+c.dataset.label+': '+Number(c.parsed.y).toFixed(1);}}}},
+          scales:{
+            x:{grid:{display:false},border:{display:false},ticks:{color:GRAY_TEXT,font:{size:10},maxRotation:30}},
+            y:{grid:{color:'#EDF0F3'},border:{display:false},ticks:{color:GRAY_TEXT,font:{size:10},maxTicksLimit:5},min:mvfR[0],max:mvfR[1]}
+          }
+        }
+      });
+    }
+  });
+}
+
+function renderHistory(){
+  var scans=sorted(load()).reverse();
+  var el=document.getElementById('history');
+  if(!scans.length){
+    el.innerHTML='<div class="empty"><div style="font-size:36px;margin-bottom:12px">○</div><div style="font-weight:600;font-size:15px;margin-bottom:6px;color:#1D2D44">No scans yet</div></div>';
+    return;
+  }
+  var html='<div style="margin-top:4px"></div>';
+  scans.forEach(function(s,i){
+    html+='<div class="scan-item" onclick="openScan('+(scans.length-1-i)+')">'+
+      '<div><div class="scan-date-text">'+fmtDate(s.date)+'</div>'+
+      '<div class="scan-sub">SMM '+fmt(s.smm)+' lb &nbsp;&bull;&nbsp; PBF '+fmt(s.bfp)+'% &nbsp;&bull;&nbsp; BMI '+fmt(s.bmi)+'</div></div>'+
+      '<div class="scan-weight">'+fmt(s.weight)+' lb</div></div>';
+  });
+  html+='<div style="height:80px"></div>';
+  el.innerHTML=html;
+}
+
+function openScan(idx){
+  var scans=sorted(load());
+  var s=scans[idx];
+  if(!s) return;
+  document.getElementById('modal-date').textContent=fmtDate(s.date);
+  var sections=[
+    {title:'Body Composition Analysis',fields:[
+      ['Weight','weight','lb'],['Body Fat Mass','bfm','lb'],['Dry Lean Mass','dlm','lb'],
+      ['Total Body Water','tbw','lb']
+    ]},
+    {title:'Muscle-Fat Analysis',fields:[
+      ['SMM','smm','lb'],['PBF','bfp','%'],['BMI','bmi','kg/m²']
+    ]},
+    {title:'Body Fat 0 Control',fields:[
+      ['Body Fat Control','bfc','lb'],['Lean Mass Control','lmc','lb']
+    ]},
+    {title:'Research Parameters',fields:[
+      ['BMR','bmr','kcal'],['SMI','smi','kg/m²']
+    ]},
+    {title:'Segmental Lean',fields:[
+      ['Left Arm','la','lb'],['Left Arm %','laPct','%'],
+      ['Right Arm','ra','lb'],['Right Arm %','raPct','%'],
+      ['Trunk','trunk','lb'],['Trunk %','trunkPct','%'],
+      ['Left Leg','ll','lb'],['Left Leg %','llPct','%'],
+      ['Right Leg','rl','lb'],['Right Leg %','rlPct','%']
+    ]}
+  ];
+  var html='';
+  sections.forEach(function(sec){
+    var rows=sec.fields.filter(function(f){ var v=s[f[1]]; return v!=null&&v!==''; });
+    if(!rows.length) return;
+    html+='<div style="font-size:10px;font-weight:700;color:#9BA8B5;letter-spacing:.05em;text-transform:uppercase;margin:12px 0 6px">'+sec.title+'</div>';
+    html+='<div class="detail-grid">';
+    rows.forEach(function(f){
+      var v=s[f[1]];
+      var disp=(f[1]==='bfc'||f[1]==='lmc')?fmtSign(v):fmt(v);
+      html+='<div class="detail-row"><div class="detail-label">'+f[0]+(f[2]?' ('+f[2]+')':'')+'</div><div class="detail-value">'+disp+'</div></div>';
+    });
+    html+='</div>';
+  });
+  document.getElementById('modal-body').innerHTML=html;
+  document.getElementById('modal-delete-btn').onclick=function(){ deleteScan(idx); };
+  document.getElementById('scan-modal').classList.add('open');
+}
+
+function closeModal(){ document.getElementById('scan-modal').classList.remove('open'); }
+
+function deleteScan(idx){
+  if(!confirm('Delete this scan?')) return;
+  var scans=sorted(load()); scans.splice(idx,1); save(scans);
+  closeModal(); renderHistory();
+}
+
+function saveScan(){
+  var d=document.getElementById('f-date').value;
+  if(!d){ alert('Please enter a scan date.'); return; }
+  function v(id){ return parseFloat(document.getElementById(id).value)||null; }
+  var scan={
+    date:d,
+    weight:v('f-weight'), bfm:v('f-bfm'), dlm:v('f-dlm'), tbw:v('f-tbw'),
+    smm:v('f-smm'), bfp:v('f-bfp'), bmi:v('f-bmi'),
+    bfc:v('f-bfc'), lmc:v('f-lmc'),
+    bmr:v('f-bmr'), smi:v('f-smi'),
+    la:v('f-la'), laPct:v('f-la-pct'),
+    ra:v('f-ra'), raPct:v('f-ra-pct'),
+    trunk:v('f-trunk'), trunkPct:v('f-trunk-pct'),
+    ll:v('f-ll'), llPct:v('f-ll-pct'),
+    rl:v('f-rl'), rlPct:v('f-rl-pct'),
+  };
+  var scans=load(); scans.push(scan); save(scans);
+  var ids=['f-date','f-weight','f-bfm','f-dlm','f-tbw','f-smm','f-bfp','f-bmi',
+           'f-bfc','f-lmc','f-bmr','f-smi','f-la','f-la-pct','f-ra','f-ra-pct',
+           'f-trunk','f-trunk-pct','f-ll','f-ll-pct','f-rl','f-rl-pct'];
+  ids.forEach(function(id){ document.getElementById(id).value=''; });
+  showPage('dashboard',document.querySelectorAll('.nav button')[0]);
+}
+
+document.getElementById('f-date').valueAsDate=new Date();
+renderDashboard();
+
+// ── PIN lock ──────────────────────────────────────────────────────────
+var LS_PIN = 'inbody_pin_hash';
+var _pinEntry = '';
+var _setPinFirst = '';
+var _setPinStage = 'first'; // 'first' or 'confirm'
+
+// SHA-256 via Web Crypto — async but we only call it on press
+async function sha256(str){
+  var buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+}
+
+function _updateDots(entry, prefix){
+  for(var i=0;i<6;i++){
+    var d = document.getElementById((prefix||'d')+i);
+    if(d) d.className = 'pin-dot' + (i < entry.length ? ' filled' : '');
+  }
+}
+
+async function pinPress(n){
+  var errEl = document.getElementById('pin-error');
+  if(_pinEntry.length >= 6) return;
+  _pinEntry += n;
+  _updateDots(_pinEntry, 'd');
+  if(_pinEntry.length === 6){
+    var stored = localStorage.getItem(LS_PIN);
+    if(!stored){
+      // No PIN set yet — go to set-PIN flow
+      _pinEntry = '';
+      _updateDots(_pinEntry, 'd');
+      showSetPin();
+      return;
+    }
+    var hash = await sha256(_pinEntry);
+    if(hash === stored){
+      // Correct
+      document.getElementById('lock-screen').style.display = 'none';
+      document.getElementById('pin-change-btn').style.display = 'block';
+      if(isConnected()) gistLoad();
+    } else {
+      errEl.textContent = 'Incorrect PIN';
+      _pinEntry = '';
+      setTimeout(function(){
+        _updateDots(_pinEntry, 'd');
+        errEl.textContent = '';
+      }, 600);
+    }
+  }
+}
+
+function showSetPin(){
+  _setPinFirst = '';
+  _setPinStage = 'first';
+  _pinEntry = '';
+  _updateDots(_pinEntry, 'd');
+  document.getElementById('set-pin-sub').textContent = 'Enter a new 6-digit PIN';
+  document.getElementById('set-pin-error').textContent = '';
+  _updateDots('', 'sd');
+  document.getElementById('lock-screen').style.display = 'none';
+  document.getElementById('set-pin-screen').style.display = 'flex';
+}
+
+async function setPinPress(n){
+  var errEl = document.getElementById('set-pin-error');
+  var current = _setPinStage === 'first' ? _setPinFirst : _pinEntry;
+  if(current.length >= 6) return;
+
+  if(_setPinStage === 'first'){
+    _setPinFirst += n;
+    _updateDots(_setPinFirst, 'sd');
+    if(_setPinFirst.length === 6){
+      // Move to confirm stage
+      _setPinStage = 'confirm';
+      _pinEntry = '';
+      setTimeout(function(){
+        document.getElementById('set-pin-sub').textContent = 'Confirm your PIN';
+        _updateDots('', 'sd');
+      }, 200);
+    }
+  } else {
+    _pinEntry += n;
+    _updateDots(_pinEntry, 'sd');
+    if(_pinEntry.length === 6){
+      if(_pinEntry === _setPinFirst){
+        // Match — save hash
+        var hash = await sha256(_pinEntry);
+        localStorage.setItem(LS_PIN, hash);
+        document.getElementById('set-pin-screen').style.display = 'none';
+        document.getElementById('lock-screen').style.display = 'none';
+        document.getElementById('pin-change-btn').style.display = 'block';
+        _pinEntry = '';
+        if(isConnected()) gistLoad();
+      } else {
+        errEl.textContent = 'PINs did not match — try again';
+        _setPinFirst = '';
+        _pinEntry = '';
+        _setPinStage = 'first';
+        setTimeout(function(){
+          document.getElementById('set-pin-sub').textContent = 'Enter a new 6-digit PIN';
+          _updateDots('', 'sd');
+          errEl.textContent = '';
+        }, 800);
+      }
+    }
+  }
+}
+
+// Add "Change PIN" to settings page
+function renderChangePinInSettings(){
+  var el = document.getElementById('settings-change-pin');
+  if(!el) return;
+  el.style.display = 'block';
+}
+
+
+function renderSettingsProfile(){
+  var el=document.getElementById('settings-profile-display');if(!el)return;
+  var p=getProfile();
+  if(!profileComplete()){el.textContent='No profile set yet.';return;}
+  var ht=Math.round(p.heightCm/2.54),ft=Math.floor(ht/12),ins=ht%12;
+  el.innerHTML=ft+"'"+ins+'" &nbsp;&bull;&nbsp; Age '+p.age+' &nbsp;&bull;&nbsp; '+p.sex.charAt(0).toUpperCase()+p.sex.slice(1);
+}
+
+function exportJSON(){
+  var payload=JSON.stringify({scans:load(),profile:getProfile()},null,2);
+  var blob=new Blob([payload],{type:'application/json'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download='inbody_backup_'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function importJSON(input){
+  var file=input.files[0];if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      var p=JSON.parse(e.target.result);
+      var incoming=Array.isArray(p)?p:(p.scans||[]);
+      var inProfile=p.profile||null;
+      var existing=load(),seen={};
+      existing.forEach(function(s){seen[s.date+'_'+s.weight]=1;});
+      var added=0;
+      incoming.forEach(function(s){if(!seen[s.date+'_'+s.weight]){existing.push(s);added++;}});
+      save(existing);
+      if(inProfile&&!profileComplete())saveProfile(inProfile);
+      var el=document.getElementById('import-status');
+      el.textContent='Imported '+added+' scan'+(added!==1?'s':'')+'.';
+      el.style.color='#2A9D8F';el.style.display='block';
+      setTimeout(function(){showPage('dashboard',document.querySelectorAll('.nav button')[0]);},1400);
+    }catch(err){
+      var el=document.getElementById('import-status');
+      el.textContent='Error: '+err.message;el.style.color='#E8637A';el.style.display='block';
+    }
+  };
+  reader.readAsText(file);input.value='';
+}
+
+function deleteAllData(){
+  if(!confirm('Delete ALL local scan data?\nThis does not affect your Gist.'))return;
+  localStorage.removeItem(LS_SCANS);
+  showPage('dashboard',document.querySelectorAll('.nav button')[0]);
+}
+
+// On load: sync from Gist if connected
+if(isConnected()){
+  setSyncStatus('Syncing…','#9BA8B5');
+  gistLoad();
+}
+
+</script>
+
+<div id="settings" class="page">
+  <div style="margin-top:4px"></div>
+
+  <div id="gist-setup-card" class="card">
+    <div class="info-title">GitHub Gist sync</div>
+    <div id="gist-connected-view" style="display:none">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="width:10px;height:10px;border-radius:50%;background:#2A9D8F;flex-shrink:0"></div>
+        <span style="font-size:14px;font-weight:600;color:#1D2D44">Connected</span>
+      </div>
+      <div id="gist-info" style="font-size:12px;color:#9BA8B5;margin-bottom:12px"></div>
+      <button onclick="disconnectGist()" style="width:100%;padding:10px;background:none;border:1px solid #DDE1E7;color:#555F70;border-radius:10px;font-size:13px;font-weight:500;cursor:pointer">Disconnect</button>
+    </div>
+    <div id="gist-setup-view">
+      <p style="font-size:13px;color:#555F70;line-height:1.5;margin-bottom:14px">Connect to a GitHub Gist to sync your data across all devices automatically. Your data stays private in your GitHub account.</p>
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:600;color:#555F70;display:block;margin-bottom:5px">Personal Access Token</label>
+        <input type="password" id="s-token" placeholder="ghp_xxxxxxxxxxxx" style="width:100%;padding:10px 12px;border:1px solid #DDE1E7;border-radius:10px;font-size:14px;background:#FAFBFC;outline:none;color:#1D2D44">
+        <div style="font-size:11px;color:#9BA8B5;margin-top:4px">Needs <code>gist</code> scope only. <a href="https://github.com/settings/tokens/new?scopes=gist&description=InBody+Tracker" target="_blank" style="color:#2A9D8F">Create one here →</a></div>
+      </div>
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:600;color:#555F70;display:block;margin-bottom:5px">Gist ID <span style="font-weight:400;color:#9BA8B5">(leave blank to create new)</span></label>
+        <input type="text" id="s-gist-id" placeholder="e.g. a1b2c3d4e5f6..." style="width:100%;padding:10px 12px;border:1px solid #DDE1E7;border-radius:10px;font-size:14px;background:#FAFBFC;outline:none;color:#1D2D44">
+      </div>
+      <div id="gist-setup-status" style="font-size:13px;margin-bottom:10px;display:none"></div>
+      <button onclick="connectGist()" style="width:100%;padding:13px;background:#E8637A;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer">Connect</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="info-title">Export JSON backup</div>
+    <p style="font-size:13px;color:#555F70;margin-bottom:12px">Download all scan data as a local JSON backup.</p>
+    <button onclick="exportJSON()" style="width:100%;padding:13px;background:#2A9D8F;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer">Export JSON</button>
+  </div>
+
+  <div class="card">
+    <div class="info-title">Import data</div>
+    <p style="font-size:13px;color:#555F70;margin-bottom:12px">Merge scans from a JSON backup file.</p>
+    <label style="display:block;width:100%;padding:13px;background:#E8ECF0;color:#1D2D44;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;text-align:center;box-sizing:border-box">
+      Choose JSON file
+      <input type="file" id="import-file" accept=".json" style="display:none" onchange="importJSON(this)">
+    </label>
+    <div id="import-status" style="margin-top:10px;font-size:13px;display:none"></div>
+  </div>
+
+  <div class="card">
+    <div class="info-title">Profile</div>
+    <div id="settings-profile-display" style="font-size:14px;color:#1D2D44;margin-bottom:10px"></div>
+    <button onclick="showPage('add',document.querySelectorAll('.nav button')[2])" style="width:100%;padding:11px;background:none;border:1px solid #DDE1E7;color:#555F70;border-radius:10px;font-size:14px;font-weight:500;cursor:pointer">Edit Profile</button>
+  </div>
+
+  <div class="card" id="settings-change-pin">
+    <div class="info-title">PIN lock</div>
+    <p style="font-size:13px;color:#555F70;margin-bottom:12px">Change the 6-digit PIN used to unlock this app.</p>
+    <button onclick="showSetPin()" style="width:100%;padding:13px;background:#1D2D44;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer">Change PIN</button>
+  </div>
+  <div class="card" style="border-color:#F0B4BD">
+    <div class="info-title" style="color:#C0385A">Danger Zone</div>
+    <p style="font-size:13px;color:#555F70;margin-bottom:12px">Delete all local scan data. This does not delete the Gist.</p>
+    <button onclick="deleteAllData()" style="width:100%;padding:13px;background:none;border:1.5px solid #E8637A;color:#E8637A;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer">Delete All Local Data</button>
+  </div>
+  <div style="height:80px"></div>
+</div>
+</body>
+</html>
