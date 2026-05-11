@@ -113,6 +113,21 @@ input:focus{border-color:#E8637A;background:#fff}
 .pin-btn.zero{grid-column:2}
 .pin-error{font-size:13px;color:#E8637A;margin-top:12px;min-height:18px}
 .pin-change-btn{margin-top:16px;background:none;border:none;font-size:12px;color:#9BA8B5;cursor:pointer;text-decoration:underline}
+
+.h30-item{background:#fff;border-radius:14px;padding:14px 16px;margin-bottom:8px;border:1px solid #E8ECF0}
+.h30-date{font-size:13px;font-weight:700;color:#1D2D44;margin-bottom:8px}
+.h30-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.h30-metric{background:#F4F4F7;border-radius:8px;padding:8px;text-align:center}
+.h30-metric-label{font-size:10px;color:#9BA8B5;font-weight:600;margin-bottom:2px}
+.h30-metric-value{font-size:14px;font-weight:700;color:#1D2D44}
+.h30-metric-est{font-size:11px;color:#2A9D8F;font-weight:600;margin-top:1px}
+.cal-card{background:#fff;border-radius:14px;padding:14px 16px;margin-bottom:8px;border:1px solid #E8ECF0}
+.cal-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #F4F4F7}
+.cal-row:last-child{border-bottom:none}
+.cal-metric{font-size:13px;color:#555F70;font-weight:500}
+.cal-factor{font-size:13px;font-weight:700;color:#1D2D44;text-align:right}
+.cal-factor span{font-size:11px;font-weight:400;color:#9BA8B5;display:block}
+.paired-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;background:#E0F4F2;color:#1A7A6E}
 </style>
 </head>
 <body>
@@ -183,6 +198,8 @@ input:focus{border-color:#E8637A;background:#fff}
     <button class="active" onclick="showPage('dashboard',this)">Dashboard</button>
     <button onclick="showPage('history',this)">History</button>
     <button onclick="showPage('add',this)">+ Add Scan</button>
+    <button onclick="showPage('homescale',this)">H30</button>
+    <button onclick="showPage('compare',this)">&#9878;</button>
     <button onclick="showPage('settings',this)" style="flex:0 0 42px;font-size:15px">&#9881;</button>
   </div>
 </div>
@@ -297,6 +314,8 @@ function save(scans){
   _saveLocal(scans);
   gistSave();
 }
+function loadHome(){ try{ return JSON.parse(localStorage.getItem('inbody_home_v1'))||[]; }catch(e){ return []; } }
+function saveHome(scans){ localStorage.setItem('inbody_home_v1',JSON.stringify(scans)); gistSave(); }
 
 // ── GitHub Gist sync ──────────────────────────────────────────────────
 function getToken(){ return localStorage.getItem(LS_TOKEN)||''; }
@@ -321,6 +340,7 @@ async function gistLoad(){
     if(!content) throw new Error('File not found in Gist');
     var parsed = JSON.parse(content);
     if(parsed.scans) _saveLocal(parsed.scans);
+    if(parsed.home_scans) localStorage.setItem('inbody_home_v1', JSON.stringify(parsed.home_scans));
     if(parsed.profile) localStorage.setItem(LS_PROFILE, JSON.stringify(parsed.profile));
     setSyncStatus('Synced ' + _timeAgo(new Date()), '#2A9D8F');
     renderDashboard();
@@ -337,7 +357,7 @@ async function gistSave(){
   _saveDebounce = setTimeout(async function(){
     setSyncStatus('Saving…', '#9BA8B5');
     try{
-      var payload = JSON.stringify({ scans:load(), profile:getProfile() }, null, 2);
+      var payload = JSON.stringify({ scans:load(), home_scans:loadHome(), profile:getProfile() }, null, 2);
       var body = { files:{ 'inbody_data.json':{ content:payload } } };
       var resp = await fetch('https://api.github.com/gists/'+getGistId(), {
         method:'PATCH',
@@ -496,6 +516,8 @@ function showPage(id,btn){
   if(id==='history') renderHistory();
   if(id==='add') renderProfileBanner();
   if(id==='settings'){ renderSettingsProfile(); updateGistUI(); }
+  if(id==='homescale') renderH30List();
+  if(id==='compare') renderCalibration();
 }
 function renderProfileBanner(){
   var p=getProfile(),el=document.getElementById('profile-banner');
@@ -869,6 +891,283 @@ function saveScan(){
 document.getElementById('f-date').valueAsDate=new Date();
 renderDashboard();
 
+// ── H30 home scale ────────────────────────────────────────────────────
+var KJ_TO_KCAL = 0.239006;
+
+function parseH30Date(raw){
+  // Format: YYYYMMDDHHmmss
+  var s = String(raw).replace(/\D/g,'');
+  if(s.length < 8) return null;
+  return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8);
+}
+
+function importH30CSV(input){
+  var file = input.files[0]; if(!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      var lines = e.target.result.replace(/^\uFEFF/,'').split('\n').filter(function(l){ return l.trim(); });
+      if(lines.length < 2) throw new Error('File appears empty');
+      var headers = lines[0].split(',');
+
+      // Map header names to indices
+      function idx(name){
+        for(var i=0;i<headers.length;i++){
+          if(headers[i].trim().toLowerCase().indexOf(name.toLowerCase()) >= 0) return i;
+        }
+        return -1;
+      }
+
+      var iDate   = 0;
+      var iWt     = idx('Weight(lb)');
+      var iSMM    = idx('Skeletal Muscle Mass(lb)');
+      var iSLM    = idx('Soft Lean Mass(lb)');
+      var iBFM    = idx('Body Fat Mass(lb)');
+      var iBMI    = idx('BMI');
+      var iBFP    = idx('Percent Body Fat');
+      var iBMR    = idx('Basal Metabolic Rate');
+      var iScore  = idx('InBody Score');
+      var iWHR    = idx('Waist Hip Ratio');
+      var iVisc   = idx('Visceral Fat Level');
+
+      var parsed = [];
+      for(var i=1;i<lines.length;i++){
+        var cols = lines[i].split(',');
+        if(!cols[0] || cols[0].trim() === '') continue;
+        var date = parseH30Date(cols[0]);
+        if(!date) continue;
+
+        function val(j){ if(j<0||j>=cols.length) return null; var v=cols[j].trim(); return (v==='-'||v==='')? null : parseFloat(v)||null; }
+
+        var bmrKj = val(iBMR);
+        parsed.push({
+          date:   date,
+          source: 'H30',
+          weight: val(iWt),
+          smm:    val(iSMM),
+          slm:    val(iSLM),   // Soft Lean Mass
+          bfm:    val(iBFM),
+          bmi:    val(iBMI),
+          bfp:    val(iBFP),
+          bmr:    bmrKj ? Math.round(bmrKj * KJ_TO_KCAL) : null,  // convert kJ→kcal
+          score:  val(iScore),
+          whr:    val(iWHR),
+          visc:   val(iVisc),
+        });
+      }
+
+      if(!parsed.length) throw new Error('No valid rows found');
+
+      // Merge — skip duplicates by date
+      var existing = loadHome();
+      var seen = {};
+      existing.forEach(function(s){ seen[s.date] = 1; });
+      var added = 0;
+      parsed.forEach(function(s){ if(!seen[s.date]){ existing.push(s); added++; } });
+      existing.sort(function(a,b){ return a.date < b.date ? -1 : 1; });
+      saveHome(existing);
+
+      var el = document.getElementById('h30-import-status');
+      el.textContent = 'Imported ' + added + ' scan' + (added!==1?'s':'') + ' from H30.';
+      el.style.color = '#2A9D8F'; el.style.display = 'block';
+      setTimeout(function(){
+        renderH30List();
+        el.style.display = 'none';
+      }, 2000);
+    }catch(err){
+      var el = document.getElementById('h30-import-status');
+      el.textContent = 'Error: ' + err.message;
+      el.style.color = '#E8637A'; el.style.display = 'block';
+    }
+  };
+  reader.readAsText(file); input.value = '';
+}
+
+function renderH30List(){
+  var el = document.getElementById('h30-list');
+  if(!el) return;
+  var scans = loadHome().slice().reverse();
+  var cal   = getCalibration();
+
+  if(!scans.length){
+    el.innerHTML = '<div class="empty" style="padding:30px 20px;text-align:center;color:#9BA8B5;font-size:13px">No H30 data yet. Import a CSV above.</div>';
+    return;
+  }
+
+  var html = '';
+  scans.forEach(function(s){
+    var est = applyCalibration(s, cal);
+    html += '<div class="h30-item">';
+    html += '<div class="h30-date">' + fmtDate(s.date) + ' <span style="font-size:11px;color:#9BA8B5;font-weight:400;margin-left:4px">H30</span></div>';
+    html += '<div class="h30-grid">';
+    html += h30Metric('Weight', fmt(s.weight), est.weight ? fmt(est.weight) : null, 'lb');
+    html += h30Metric('Muscle', fmt(s.smm), est.smm ? fmt(est.smm) : null, 'lb');
+    html += h30Metric('Body Fat', fmt(s.bfp), est.bfp ? fmt(est.bfp) : null, '%');
+    html += h30Metric('Fat Mass', fmt(s.bfm), est.bfm ? fmt(est.bfm) : null, 'lb');
+    html += h30Metric('BMI', fmt(s.bmi), est.bmi ? fmt(est.bmi) : null, '');
+    html += h30Metric('BMR', fmt(s.bmr,0), est.bmr ? fmt(est.bmr,0) : null, 'kcal');
+    html += '</div>';
+    if(cal.paired > 0){
+      html += '<div style="font-size:11px;color:#9BA8B5;margin-top:8px;text-align:right">Teal = est. 270 equivalent</div>';
+    }
+    html += '</div>';
+  });
+  el.innerHTML = html;
+}
+
+function h30Metric(label, raw, est, unit){
+  return '<div class="h30-metric">' +
+    '<div class="h30-metric-label">' + label + (unit?' ('+unit+')':'') + '</div>' +
+    '<div class="h30-metric-value">' + (raw||'—') + '</div>' +
+    (est ? '<div class="h30-metric-est">~' + est + '</div>' : '') +
+    '</div>';
+}
+
+// ── Calibration engine ────────────────────────────────────────────────
+// Metrics that exist on both devices (H30 key → dietitian key)
+var CAL_METRICS = [
+  { key:'weight', label:'Weight',           unit:'lb'   },
+  { key:'smm',    label:'Skeletal Muscle',  unit:'lb'   },
+  { key:'bfm',    label:'Body Fat Mass',    unit:'lb'   },
+  { key:'bfp',    label:'Body Fat %',       unit:'%'    },
+  { key:'bmi',    label:'BMI',              unit:'kg/m²'},
+  { key:'bmr',    label:'BMR',              unit:'kcal' },
+];
+
+function dateDiffDays(a, b){
+  // Append T12:00:00 so date parses as local noon, not UTC midnight.
+  // Prevents timezone boundary shifts turning same-day into 1-day apart.
+  var da = new Date(a + 'T12:00:00');
+  var db = new Date(b + 'T12:00:00');
+  return Math.round(Math.abs(da - db) / 86400000);
+}
+
+function findNearestDietitian(homeDate){
+  // Only match if within 1 calendar day (same day or adjacent)
+  var dietScans = sorted(load());
+  if(!dietScans.length) return null;
+  var best = null, bestDiff = Infinity;
+  dietScans.forEach(function(s){
+    var diff = dateDiffDays(homeDate, s.date);
+    if(diff <= 1 && diff < bestDiff){ best = s; bestDiff = diff; }
+  });
+  return best;
+}
+
+function getCalibration(){
+  // Only pair H30 + 270 scans within 1 day of each other
+  // offset = avg((270_val - h30_val) / h30_val * 100) per metric
+  // Apply: estimated_270 = h30_val * (1 + offset/100)
+  var homeScans = loadHome();
+  var pctSums = {}, counts = {};
+  CAL_METRICS.forEach(function(m){ pctSums[m.key]=0; counts[m.key]=0; });
+  var paired = 0;
+  homeScans.forEach(function(hs){
+    var ds = findNearestDietitian(hs.date);
+    if(!ds) return;
+    paired++;
+    CAL_METRICS.forEach(function(m){
+      var hv = hs[m.key], dv = ds[m.key];
+      if(hv && dv && hv > 0){
+        pctSums[m.key] += ((dv - hv) / hv) * 100;
+        counts[m.key]  += 1;
+      }
+    });
+  });
+  var offsets = {};
+  CAL_METRICS.forEach(function(m){
+    offsets[m.key] = counts[m.key] > 0 ? pctSums[m.key] / counts[m.key] : null;
+  });
+  return { offsets:offsets, paired:paired };
+}
+function applyCalibration(homeScan, cal){
+  var out = {};
+  CAL_METRICS.forEach(function(m){
+    var offset = cal.offsets[m.key];
+    var v = homeScan[m.key];
+    if(offset !== null && offset !== undefined && v){
+      out[m.key] = Math.round(v * (1 + offset/100) * 10) / 10;
+    }
+  });
+  return out;
+}
+
+function renderCalibration(){
+  var el = document.getElementById('calibration-panel');
+  if(!el) return;
+  var homeScans = loadHome();
+  var dietScans = load();
+
+  if(!homeScans.length){
+    el.innerHTML = '<div class="cal-card"><p style="font-size:13px;color:#9BA8B5">Import H30 data first from the H30 tab.</p></div>';
+    return;
+  }
+  if(!dietScans.length){
+    el.innerHTML = '<div class="cal-card"><p style="font-size:13px;color:#9BA8B5">Add at least one InBody 270 scan first.</p></div>';
+    return;
+  }
+
+  var cal = getCalibration();
+  var html = '';
+
+  // Summary card
+  html += '<div class="cal-card">';
+  html += '<div class="info-title">Calibration Summary</div>';
+  if(cal.paired === 0){
+    html += '<p style="font-size:13px;color:#E8637A;line-height:1.5">No same-day pairs found yet. Take your H30 scan on the same day as a dietitian appointment to build calibration data.</p>';
+  } else {
+    html += '<p style="font-size:13px;color:#555F70;line-height:1.5;margin-bottom:12px">Based on <strong>' + cal.paired + ' paired scan' + (cal.paired!==1?'s':'') + '</strong> — only H30 scans taken within 1 day of a 270 scan are used.</p>';
+    html += '<div class="info-title" style="margin-top:8px;margin-bottom:8px">Correction Factors</div>';
+    html += '<div style="font-size:12px;color:#9BA8B5;margin-bottom:8px">Factor = average(270 value ÷ H30 value). Applied to new H30 readings to estimate 270 equivalent.</div>';
+    CAL_METRICS.forEach(function(m){
+      var offset = cal.offsets[m.key];
+      if(offset === null || offset === undefined) return;
+      var sign = offset >= 0 ? '+' : '';
+      var color = Math.abs(offset) < 1 ? '#2A9D8F' : Math.abs(offset) < 5 ? '#E29578' : '#E8637A';
+      html += '<div class="cal-row">';
+      html += '<div class="cal-metric">' + m.label + ' <span style="font-size:11px;color:#9BA8B5">(' + m.unit + ')</span></div>';
+      html += '<div class="cal-factor" style="color:' + color + '">' + sign + offset.toFixed(2) + '%<span>270 vs H30 avg offset</span></div>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+
+  // Paired scans table
+  if(cal.paired > 0){
+    html += '<div class="cal-card">';
+    html += '<div class="info-title">Paired Scan Matches</div>';
+    html += '<p style="font-size:12px;color:#9BA8B5;margin-bottom:10px">H30 scans paired with 270 scans taken within 1 day.</p>';
+    var homeScans2 = loadHome().slice().reverse();
+    homeScans2.forEach(function(hs){
+      var ds = findNearestDietitian(hs.date);
+      if(!ds) return;
+      var diffDays = Math.round(Math.abs(new Date(hs.date).getTime() - new Date(ds.date).getTime()) / 86400000);
+      html += '<div style="padding:10px 0;border-bottom:1px solid #F4F4F7">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+      html += '<span style="font-size:12px;font-weight:700;color:#1D2D44">H30: ' + fmtDate(hs.date) + '</span>';
+      html += '<span class="paired-badge">↔ 270: ' + fmtDate(ds.date) + ' (' + diffDays + 'd)</span>';
+      html += '</div>';
+      html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">';
+      CAL_METRICS.forEach(function(m){
+        var hv = hs[m.key], dv = ds[m.key];
+        if(!hv||!dv) return;
+        var pct = ((dv-hv)/hv*100).toFixed(1);
+        var sign = pct > 0 ? '+' : '';
+        html += '<div style="background:#F9FAFB;border-radius:6px;padding:5px 7px">';
+        html += '<div style="font-size:9px;color:#9BA8B5;font-weight:600">' + m.label + '</div>';
+        html += '<div style="font-size:11px;color:#1D2D44">' + hv + ' → ' + dv + '</div>';
+        html += '<div style="font-size:10px;color:' + (Math.abs(pct)<2?'#2A9D8F':'#E8637A') + '">' + sign + pct + '%</div>';
+        html += '</div>';
+      });
+      html += '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+
 // ── PIN lock ──────────────────────────────────────────────────────────
 var LS_PIN = 'inbody_pin_hash';
 var _pinEntry = '';
@@ -1105,5 +1404,35 @@ if(isConnected()){
   </div>
   <div style="height:80px"></div>
 </div>
+
+<div id="homescale" class="page">
+  <div style="margin-top:4px"></div>
+  <div class="card">
+    <div class="info-title">Import H30 Data</div>
+    <p style="font-size:13px;color:#555F70;line-height:1.5;margin-bottom:12px">
+      In the InBody app: <strong>Detail → Data Export → CSV</strong>. Import that file here.
+    </p>
+    <label style="display:block;width:100%;padding:13px;background:#1D2D44;color:#fff;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;text-align:center;box-sizing:border-box">
+      Import H30 CSV
+      <input type="file" id="h30-csv-input" accept=".csv" style="display:none" onchange="importH30CSV(this)">
+    </label>
+    <div id="h30-import-status" style="margin-top:10px;font-size:13px;display:none"></div>
+  </div>
+  <div id="h30-list"></div>
+  <div style="height:80px"></div>
+</div>
+
+<div id="compare" class="page">
+  <div style="margin-top:4px"></div>
+  <div class="card">
+    <div class="info-title">Calibration Engine</div>
+    <p style="font-size:13px;color:#555F70;line-height:1.5;margin-bottom:4px">
+      Pairs your H30 readings with nearby InBody 270 scans to calculate how much each metric differs on average. Applied to new H30 readings to estimate your 270-equivalent values.
+    </p>
+  </div>
+  <div id="calibration-panel"></div>
+  <div style="height:80px"></div>
+</div>
+
 </body>
 </html>
