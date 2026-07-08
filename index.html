@@ -301,6 +301,17 @@ var LS_PROFILE = 'inbody_profile_v1';
 var LS_TOKEN   = 'inbody_gh_token';
 var LS_GIST    = 'inbody_gh_gist';
 
+// Metrics that exist on both InBody 270 and H30 (used by both the dashboard
+// merge and the Calibration engine below).
+var CAL_METRICS = [
+  { key:'weight', label:'Weight',           unit:'lb'   },
+  { key:'smm',    label:'Skeletal Muscle',  unit:'lb'   },
+  { key:'bfm',    label:'Body Fat Mass',    unit:'lb'   },
+  { key:'bfp',    label:'Body Fat %',       unit:'%'    },
+  { key:'bmi',    label:'BMI',              unit:'kg/m²'},
+  { key:'bmr',    label:'BMR',              unit:'kcal' },
+];
+
 // ── Local storage (always used as cache) ──────────────────────────────
 function load(){ try{ return JSON.parse(localStorage.getItem(LS_SCANS))||[]; }catch(e){ return []; } }
 function _saveLocal(s){ localStorage.setItem(LS_SCANS, JSON.stringify(s)); }
@@ -327,6 +338,27 @@ function setSyncStatus(msg, color){
   if(el){ el.textContent = msg; el.style.color = color||'#9BA8B5'; }
 }
 
+// Server version we last observed. If the gist has moved past this when we
+// try to save, another device wrote in the meantime and we must merge.
+var _lastGistUpdatedAt = null;
+
+function _unionScans(a, b){
+  var seen = {}, out = [];
+  function key(s){ return s.date + '|' + (s.weight==null?'':s.weight) + '|' + (s.bfm==null?'':s.bfm); }
+  (a||[]).concat(b||[]).forEach(function(s){
+    var k = key(s);
+    if(!seen[k]){ seen[k] = 1; out.push(s); }
+  });
+  return sorted(out);
+}
+function _unionHomeScans(a, b){
+  var seen = {}, out = [];
+  (a||[]).concat(b||[]).forEach(function(s){
+    if(!seen[s.date]){ seen[s.date] = 1; out.push(s); }
+  });
+  return out.sort(function(x,y){ return x.date<y.date?-1:1; });
+}
+
 async function gistLoad(){
   if(!isConnected()) return;
   setSyncStatus('Syncing…', '#9BA8B5');
@@ -342,6 +374,7 @@ async function gistLoad(){
     if(parsed.scans) _saveLocal(parsed.scans);
     if(parsed.home_scans) localStorage.setItem('inbody_home_v1', JSON.stringify(parsed.home_scans));
     if(parsed.profile) localStorage.setItem(LS_PROFILE, JSON.stringify(parsed.profile));
+    _lastGistUpdatedAt = data.updated_at || null;
     setSyncStatus('Synced ' + _timeAgo(new Date()), '#2A9D8F');
     renderDashboard();
   }catch(e){
@@ -357,6 +390,29 @@ async function gistSave(){
   _saveDebounce = setTimeout(async function(){
     setSyncStatus('Saving…', '#9BA8B5');
     try{
+      // Check for remote changes since our last read. If the gist has moved,
+      // union-merge remote data into local before writing — otherwise the
+      // PATCH would silently overwrite the other device's changes.
+      var merged = false;
+      try{
+        var head = await fetch('https://api.github.com/gists/'+getGistId(), {
+          headers:{ 'Authorization':'token '+getToken(), 'Accept':'application/vnd.github.v3+json' }
+        });
+        if(head.ok){
+          var remote = await head.json();
+          if(_lastGistUpdatedAt && remote.updated_at && remote.updated_at !== _lastGistUpdatedAt){
+            var rc = remote.files && remote.files['inbody_data.json'] && remote.files['inbody_data.json'].content;
+            if(rc){
+              var rp = JSON.parse(rc);
+              _saveLocal(_unionScans(rp.scans, load()));
+              localStorage.setItem('inbody_home_v1', JSON.stringify(_unionHomeScans(rp.home_scans, loadHome())));
+              if(rp.profile && !profileComplete()) localStorage.setItem(LS_PROFILE, JSON.stringify(rp.profile));
+              merged = true;
+            }
+          }
+        }
+      }catch(_){ /* fall through to PATCH — better to overwrite than block save */ }
+
       var payload = JSON.stringify({ scans:load(), home_scans:loadHome(), profile:getProfile() }, null, 2);
       var body = { files:{ 'inbody_data.json':{ content:payload } } };
       var resp = await fetch('https://api.github.com/gists/'+getGistId(), {
@@ -369,7 +425,14 @@ async function gistSave(){
         body: JSON.stringify(body)
       });
       if(!resp.ok) throw new Error('HTTP '+resp.status);
-      setSyncStatus('Saved ✓ ' + _timeAgo(new Date()), '#2A9D8F');
+      var saved = await resp.json();
+      _lastGistUpdatedAt = saved.updated_at || null;
+      if(merged){
+        setSyncStatus('Merged & saved ' + _timeAgo(new Date()), '#E29578');
+        renderDashboard();
+      } else {
+        setSyncStatus('Saved ✓ ' + _timeAgo(new Date()), '#2A9D8F');
+      }
     }catch(e){
       setSyncStatus('Save error', '#E8637A');
       console.error('Gist save error:', e);
@@ -605,8 +668,34 @@ function yRange(arr,pad){
   return [Math.floor((mn-p)*10)/10,Math.ceil((mx+p)*10)/10];
 }
 
+// Combined 270 + calibrated-H30 timeline for the dashboard.
+// 270 scans win on same date; H30 scans get the calibration engine's
+// per-metric offset applied to estimate 270-equivalent values.
+function mergedScans(){
+  var dietScans = load();
+  var homeScans = loadHome();
+  var cal = getCalibration();
+  var dietDates = {};
+  dietScans.forEach(function(s){ dietDates[s.date] = 1; });
+  var out = dietScans.map(function(s){
+    var o = {}; for(var k in s) o[k] = s[k]; o._source = '270'; return o;
+  });
+  homeScans.forEach(function(hs){
+    if(dietDates[hs.date]) return;
+    var est = applyCalibration(hs, cal);
+    var o = {};
+    for(var k in hs) o[k] = hs[k];
+    for(var k in est) if(est[k] != null) o[k] = est[k];
+    o._source = 'H30';
+    o._calibrated = cal.paired > 0;
+    out.push(o);
+  });
+  return sorted(out);
+}
+
 function renderDashboard(){
-  var scans=sorted(load());
+  var scans=mergedScans();
+  var dietScans=sorted(load());
   var el=document.getElementById('dashboard');
   if(!scans.length){
     el.innerHTML='<div class="empty"><div style="font-size:36px;margin-bottom:12px">○</div><div style="font-weight:600;font-size:15px;margin-bottom:6px;color:#1D2D44">No scans yet</div><div>Tap "+ Add Scan" to log your first InBody 270 result.</div></div>';
@@ -615,6 +704,8 @@ function renderDashboard(){
 
   var latest=scans[scans.length-1];
   var prev=scans.length>1?scans[scans.length-2]:null;
+  var dLatest=dietScans.length?dietScans[dietScans.length-1]:null;
+  var dPrev=dietScans.length>1?dietScans[dietScans.length-2]:null;
 
   function badge(val,prevVal,lowerBetter){
     if(!prev) return '<span class="badge badge-same">First scan</span>';
@@ -627,22 +718,29 @@ function renderDashboard(){
       :'<span class="badge badge-down">'+sign+diff.toFixed(1)+'</span>';
   }
 
+  // Shared metrics (270 + calibrated H30) — timeline includes both sources
   var labels =scans.map(function(s){ return shortDate(s.date); });
   var wData  =scans.map(function(s){ return s.weight; });
   var bfData =scans.map(function(s){ return s.bfp; });
   var smmData=scans.map(function(s){ return s.smm; });
   var bfmData=scans.map(function(s){ return s.bfm; });
-  var dlmData=scans.map(function(s){ return s.dlm; });
-
-  var tbwData=scans.map(function(s){ return s.tbw; });
   var bmrData=scans.map(function(s){ return s.bmr; });
   var bmiData=scans.map(function(s){ return s.bmi; });
-  var smiData=scans.map(function(s){ return s.smi; });
-  var raData =scans.map(function(s){ return s.ra; });
-  var laData =scans.map(function(s){ return s.la; });
-  var rlData =scans.map(function(s){ return s.rl; });
-  var llData =scans.map(function(s){ return s.ll; });
-  var trData =scans.map(function(s){ return s.trunk; });
+
+  // Dry lean is only present on 270 scans, but the muscle-vs-fat chart
+  // uses the merged timeline — so map from merged scans; H30 rows leave
+  // an intentional gap.
+  var dlmData=scans.map(function(s){ return s.dlm; });
+
+  // 270-only metrics — timeline restricted to dietitian scans
+  var dLabels=dietScans.map(function(s){ return shortDate(s.date); });
+  var tbwData=dietScans.map(function(s){ return s.tbw; });
+  var smiData=dietScans.map(function(s){ return s.smi; });
+  var raData =dietScans.map(function(s){ return s.ra; });
+  var laData =dietScans.map(function(s){ return s.la; });
+  var rlData =dietScans.map(function(s){ return s.rl; });
+  var llData =dietScans.map(function(s){ return s.ll; });
+  var trData =dietScans.map(function(s){ return s.trunk; });
 
   function chartCard(title,unit,latestVal,prevVal,id){
     var diff=(prevVal!=null&&latestVal!=null)?(Number(latestVal)-Number(prevVal)):null;
@@ -653,9 +751,10 @@ function renderDashboard(){
       '<div class="chart-wrap"><canvas id="'+id+'"></canvas></div></div>';
   }
 
-  // Body Fat 0 / Lean Body Mass Control card
+  // Body Fat 0 / Lean Body Mass Control card — 270 only
   function controlCard(){
-    var bfc=latest.bfc, lmc=latest.lmc;
+    if(!dLatest) return '';
+    var bfc=dLatest.bfc, lmc=dLatest.lmc;
     var hasBfc=bfc!=null&&!isNaN(bfc), hasLmc=lmc!=null&&!isNaN(lmc);
     if(!hasBfc&&!hasLmc) return '';
     var html='<div class="info-card"><div class="info-title">Body Fat 0 &mdash; Lean Body Mass Control</div>';
@@ -676,17 +775,18 @@ function renderDashboard(){
     return html+'</div>';
   }
 
-  // Research Parameters card
+  // Research Parameters card — 270 only (SMI is dietitian-only)
   function researchCard(){
-    var smi=latest.smi; var prof=getProfile();
+    if(!dLatest) return '';
+    var smi=dLatest.smi;
     var sc=smiCat(smi);
-    var bmrDiff=prev&&latest.bmr&&prev.bmr?(Number(latest.bmr)-Number(prev.bmr)):null;
-    var smiDiff=prev&&latest.smi&&prev.smi?(Number(latest.smi)-Number(prev.smi)):null;
+    var bmrDiff=dPrev&&dLatest.bmr&&dPrev.bmr?(Number(dLatest.bmr)-Number(dPrev.bmr)):null;
+    var smiDiff=dPrev&&dLatest.smi&&dPrev.smi?(Number(dLatest.smi)-Number(dPrev.smi)):null;
     return '<div class="info-card"><div class="info-title">Research Parameters</div>'+
 
       '<div class="info-row">'+
         '<div><div class="info-name">Basal Metabolic Rate</div><div class="info-sub">Min calories at rest</div></div>'+
-        '<div class="info-right"><div class="info-val">'+fmt(latest.bmr,0)+' <span style="font-size:11px;color:#9BA8B5">kcal</span></div>'+
+        '<div class="info-right"><div class="info-val">'+fmt(dLatest.bmr,0)+' <span style="font-size:11px;color:#9BA8B5">kcal</span></div>'+
         (bmrDiff!=null?'<div class="info-diff" style="color:'+(bmrDiff>=0?TEAL:FUCHSIA)+'">'+fmtSign(bmrDiff,0)+' from prev</div>':'')+
         '</div></div>'+
       '<div class="info-row">'+
@@ -698,9 +798,10 @@ function renderDashboard(){
       '</div>';
   }
 
-  // Segmental Lean Analysis card — body diagram layout
+  // Segmental Lean Analysis card — 270 only (H30 has no segmental)
   function segCard(){
-    var s=latest;
+    if(!dLatest) return '';
+    var s=dLatest;
     function limb(label,lb,pct){
       var pc=pct!=null?Number(pct):null;
       var cls=pctClass(pc);
@@ -726,8 +827,26 @@ function renderDashboard(){
       '</div>';
   }
 
+  // Header line: date + (when latest is H30) an explicit "calibrated to 270"
+  // badge with the number of paired scans backing the average. H30 dashboard
+  // values are always the calibrated 270-equivalent — never raw.
+  var cal = getCalibration();
+  var srcTag='', srcSubtitle='';
+  if(latest._source==='H30'){
+    if(cal.paired > 0){
+      srcTag = '<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;background:#E0F4F2;color:#1A7A6E;margin-left:6px">H30 → 270 equivalent</span>';
+      srcSubtitle = '<span style="font-size:10px;color:#9BA8B5;font-weight:400;margin-left:6px">calibrated from '+cal.paired+' paired scan'+(cal.paired!==1?'s':'')+'</span>';
+    } else {
+      srcTag = '<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;background:#F2F4F7;color:#6B7A8D;margin-left:6px">H30</span>';
+      srcSubtitle = '<span style="font-size:10px;color:#9BA8B5;font-weight:400;margin-left:6px">pair with a 270 scan to enable calibration</span>';
+    }
+  }
+
   el.innerHTML=
     '<div style="margin-top:4px"></div>'+
+    '<div class="dash-full" style="display:flex;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:#9BA8B5;font-weight:600;letter-spacing:.02em">'+
+      'Latest: '+fmtDate(latest.date)+srcTag+srcSubtitle+
+    '</div>'+
     '<div class="summary-grid dash-full" style="margin-bottom:12px">'+
       '<div class="stat-card"><div class="label">Weight</div><div class="value">'+fmt(latest.weight)+'<span class="unit"> lb</span></div>'+badge(latest.weight,prev&&prev.weight,true)+'</div>'+
       '<div class="stat-card"><div class="label">Muscle</div><div class="value">'+fmt(latest.smm)+'<span class="unit"> lb</span></div>'+badge(latest.smm,prev&&prev.smm,false)+'</div>'+
@@ -742,31 +861,33 @@ function renderDashboard(){
     '<div class="dash-card-wrap">'+chartCard('Body Fat %','',latest.bfp,prev&&prev.bfp,'ch-bfp')+'</div>'+
     '<div class="chart-card dash-card-wrap"><div class="chart-header"><span class="chart-title">Muscle vs Fat <span class="chart-unit">(lb)</span></span></div><div class="chart-wrap"><canvas id="ch-mvf"></canvas></div><div class="multi-legend"><div class="legend-item"><div class="legend-dot" style="background:'+TEAL+'"></div>Skeletal Muscle</div><div class="legend-item"><div class="legend-dot" style="background:'+FUCHSIA+'"></div>Body Fat</div><div class="legend-item"><div class="legend-dot" style="background:#B0BAC8"></div>Dry Lean</div></div></div>'+
     '<div class="dash-card-wrap">'+chartCard('BMI','kg/m²',latest.bmi,prev&&prev.bmi,'ch-bmi')+'</div>'+
-    '<div class="dash-card-wrap">'+chartCard('Body Water','lb',latest.tbw,prev&&prev.tbw,'ch-tbw')+'</div>'+
+    (dLatest?'<div class="dash-card-wrap">'+chartCard('Body Water','lb',dLatest.tbw,dPrev&&dPrev.tbw,'ch-tbw')+'</div>':'')+
     '<div class="dash-card-wrap">'+chartCard('BMR','kcal',latest.bmr,prev&&prev.bmr,'ch-bmr')+'</div>'+
-    (latest.smi?'<div class="dash-card-wrap">'+chartCard('SMI','kg/m²',latest.smi,prev&&prev.smi,'ch-smi')+'</div>':'')+
-    '<div class="section-label dash-full">Segmental lean trends</div>'+
-    '<div class="dash-card-wrap">'+chartCard('Left Arm','lb',latest.la,prev&&prev.la,'ch-la')+'</div>'+
-    '<div class="dash-card-wrap">'+chartCard('Right Arm','lb',latest.ra,prev&&prev.ra,'ch-ra')+'</div>'+
-    '<div class="dash-card-wrap">'+chartCard('Left Leg','lb',latest.ll,prev&&prev.ll,'ch-ll')+'</div>'+
-    '<div class="dash-card-wrap">'+chartCard('Right Leg','lb',latest.rl,prev&&prev.rl,'ch-rl')+'</div>'+
-    '<div class="dash-card-wrap">'+chartCard('Trunk','lb',latest.trunk,prev&&prev.trunk,'ch-trunk')+'</div>'+
+    (dLatest&&dLatest.smi?'<div class="dash-card-wrap">'+chartCard('SMI','kg/m²',dLatest.smi,dPrev&&dPrev.smi,'ch-smi')+'</div>':'')+
+    (dLatest?'<div class="section-label dash-full">Segmental lean trends</div>'+
+      '<div class="dash-card-wrap">'+chartCard('Left Arm','lb',dLatest.la,dPrev&&dPrev.la,'ch-la')+'</div>'+
+      '<div class="dash-card-wrap">'+chartCard('Right Arm','lb',dLatest.ra,dPrev&&dPrev.ra,'ch-ra')+'</div>'+
+      '<div class="dash-card-wrap">'+chartCard('Left Leg','lb',dLatest.ll,dPrev&&dPrev.ll,'ch-ll')+'</div>'+
+      '<div class="dash-card-wrap">'+chartCard('Right Leg','lb',dLatest.rl,dPrev&&dPrev.rl,'ch-rl')+'</div>'+
+      '<div class="dash-card-wrap">'+chartCard('Trunk','lb',dLatest.trunk,dPrev&&dPrev.trunk,'ch-trunk')+'</div>':'')+
     '</div>'+
     '<div style="height:80px"></div>';
 
   requestAnimationFrame(function(){
     var r;
+    // Shared metrics — merged 270 + calibrated H30 timeline
     r=yRange(wData,2);    makeChart('ch-weight',labels,ds(wData,FUCHSIA),r[0],r[1]);
     r=yRange(bfData,1);   makeChart('ch-bfp',labels,ds(bfData,FUCHSIA),r[0],r[1]);
     r=yRange(bmiData,.5); makeChart('ch-bmi',labels,ds(bmiData,FUCHSIA),r[0],r[1]);
-    r=yRange(tbwData,2);  makeChart('ch-tbw',labels,ds(tbwData,TEAL),r[0],r[1]);
     r=yRange(bmrData,50); makeChart('ch-bmr',labels,ds(bmrData,TEAL),r[0],r[1]);
-    r=yRange(smiData,.2); makeChart('ch-smi',labels,ds(smiData,TEAL),r[0],r[1]);
-    r=yRange(raData,.3);  makeChart('ch-ra',labels,ds(raData,TEAL),r[0],r[1]);
-    r=yRange(laData,.3);  makeChart('ch-la',labels,ds(laData,TEAL),r[0],r[1]);
-    r=yRange(rlData,.5);  makeChart('ch-rl',labels,ds(rlData,TEAL),r[0],r[1]);
-    r=yRange(llData,.5);  makeChart('ch-ll',labels,ds(llData,TEAL),r[0],r[1]);
-    r=yRange(trData,1);   makeChart('ch-trunk',labels,ds(trData,TEAL),r[0],r[1]);
+    // 270-only metrics — dietitian timeline
+    r=yRange(tbwData,2);  makeChart('ch-tbw',dLabels,ds(tbwData,TEAL),r[0],r[1]);
+    r=yRange(smiData,.2); makeChart('ch-smi',dLabels,ds(smiData,TEAL),r[0],r[1]);
+    r=yRange(raData,.3);  makeChart('ch-ra',dLabels,ds(raData,TEAL),r[0],r[1]);
+    r=yRange(laData,.3);  makeChart('ch-la',dLabels,ds(laData,TEAL),r[0],r[1]);
+    r=yRange(rlData,.5);  makeChart('ch-rl',dLabels,ds(rlData,TEAL),r[0],r[1]);
+    r=yRange(llData,.5);  makeChart('ch-ll',dLabels,ds(llData,TEAL),r[0],r[1]);
+    r=yRange(trData,1);   makeChart('ch-trunk',dLabels,ds(trData,TEAL),r[0],r[1]);
 
     var allMvf=smmData.concat(bfmData).concat(dlmData).filter(function(v){return v!=null;});
     var mvfR=yRange(allMvf,5);
@@ -901,14 +1022,34 @@ function parseH30Date(raw){
   return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8);
 }
 
+// RFC-4180-ish line splitter: honors "quoted, values" and "" escaped quotes.
+function splitCsvLine(line){
+  var out=[], cur='', inQ=false;
+  for(var i=0;i<line.length;i++){
+    var ch=line[i];
+    if(inQ){
+      if(ch==='"'){
+        if(line[i+1]==='"'){ cur+='"'; i++; }
+        else inQ=false;
+      } else cur+=ch;
+    } else {
+      if(ch==='"') inQ=true;
+      else if(ch===',') { out.push(cur); cur=''; }
+      else cur+=ch;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
 function importH30CSV(input){
   var file = input.files[0]; if(!file) return;
   var reader = new FileReader();
   reader.onload = function(e){
     try{
-      var lines = e.target.result.replace(/^\uFEFF/,'').split('\n').filter(function(l){ return l.trim(); });
+      var lines = e.target.result.replace(/^\uFEFF/,'').split(/\r?\n/).filter(function(l){ return l.trim(); });
       if(lines.length < 2) throw new Error('File appears empty');
-      var headers = lines[0].split(',');
+      var headers = splitCsvLine(lines[0]);
 
       // Map header names to indices
       function idx(name){
@@ -932,7 +1073,7 @@ function importH30CSV(input){
 
       var parsed = [];
       for(var i=1;i<lines.length;i++){
-        var cols = lines[i].split(',');
+        var cols = splitCsvLine(lines[i]);
         if(!cols[0] || cols[0].trim() === '') continue;
         var date = parseH30Date(cols[0]);
         if(!date) continue;
@@ -970,10 +1111,9 @@ function importH30CSV(input){
       var el = document.getElementById('h30-import-status');
       el.textContent = 'Imported ' + added + ' scan' + (added!==1?'s':'') + ' from H30.';
       el.style.color = '#2A9D8F'; el.style.display = 'block';
-      setTimeout(function(){
-        renderH30List();
-        el.style.display = 'none';
-      }, 2000);
+      renderH30List();
+      renderDashboard();
+      setTimeout(function(){ el.style.display = 'none'; }, 2000);
     }catch(err){
       var el = document.getElementById('h30-import-status');
       el.textContent = 'Error: ' + err.message;
@@ -1024,16 +1164,7 @@ function h30Metric(label, raw, est, unit){
 }
 
 // ── Calibration engine ────────────────────────────────────────────────
-// Metrics that exist on both devices (H30 key → dietitian key)
-var CAL_METRICS = [
-  { key:'weight', label:'Weight',           unit:'lb'   },
-  { key:'smm',    label:'Skeletal Muscle',  unit:'lb'   },
-  { key:'bfm',    label:'Body Fat Mass',    unit:'lb'   },
-  { key:'bfp',    label:'Body Fat %',       unit:'%'    },
-  { key:'bmi',    label:'BMI',              unit:'kg/m²'},
-  { key:'bmr',    label:'BMR',              unit:'kcal' },
-];
-
+// CAL_METRICS is declared near the top of the script (shared with dashboard).
 function dateDiffDays(a, b){
   // Append T12:00:00 so date parses as local noon, not UTC midnight.
   // Prevents timezone boundary shifts turning same-day into 1-day apart.
